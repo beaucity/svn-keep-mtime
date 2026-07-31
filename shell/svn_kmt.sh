@@ -13,7 +13,7 @@
 #
 #
 #  Version:
-#      0.5.6
+#      0.5.7
 #
 # ============================================================================
 
@@ -22,7 +22,7 @@
 # Configuration
 ##############################################################################
 
-SVN_KMT_VERSION="0.5.6"
+SVN_KMT_VERSION="0.5.7"
 
 FILE_MTIME_PROP="file:mtime"
 
@@ -151,11 +151,15 @@ ext_install()
 
     [ "$(basename "$SVN")" = "svn_org" ] && echo "SVN Keep MTime is already installed" && return 1
 
-    cp_from=$0
+    script_name=$(basename "$0")
+    script_dir="$(cd "$(dirname "$0")" && pwd)"
 
-    if [ "$(basename "$cp_from")" != "svn_kmt.sh" ]; then
+    cp_from="$script_dir/$script_name"
+
+    if [ "$script_name" != "svn_kmt.sh" ]; then
         printf "Please run the command as follows:
-        ./svn_kmt.sh ext-install"
+        ./svn_kmt.sh ext-install
+        "
         return 1
     fi
 
@@ -178,33 +182,49 @@ ext_install()
     fi
 
     if [ ! -f "$svn_kmt" ]; then
-        if ! cp "$cp_from" "$svn_kmt"; then
-            echo "Copy $cp_from to $svn_kmt failed!"
-            return 1
-        fi
+        if [ "$1" = "--link" ]; then
+            if ! ln -s "$cp_from" "$svn_kmt"; then    #link mode
+                echo "Link $svn_kmt -> $cp_from failed!"
+                return 1
+            else
+                echo "Link $svn_kmt -> $cp_from ok."
+            fi
+        else
+            if ! cp "$cp_from" "$svn_kmt"; then
+                echo "Copy $cp_from to $svn_kmt failed!"
+                return 1
+            else
+                echo "Copy $cp_from to $svn_kmt ok."
+            fi
 
-        if ! chmod +x "$svn_kmt"; then
-            echo "Add executable permission to svn_kmt failed!"
-            rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
-            return 1
+            if ! chmod +x "$svn_kmt"; then
+                echo "Add executable permission to $svn_kmt failed!"
+                rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
+                return 1
+            else
+                echo "Add executable permission to $svn_kmt ok."
+            fi
         fi
-
     fi
 
     if ! mv "$svn" "$svn_org"; then
-        echo "Move svn to svn_org failed!"
+        echo "Move $svn to $svn_org failed!"
         rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
         return 1
+    else
+        echo "Move $svn to $svn_org ok."
     fi
 
     if ! ln -s "$svn_kmt" "$svn"; then
-        echo "Link svn to svn_kmt.sh failed!"
+        echo "Link $svn -> $svn_kmt failed!"
 
         mv "$svn_org" "$svn" || echo "Rollback: Restore $svn_org to $svn failed."
 
         rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
 
         return 1
+    else
+        echo "Link $svn -> $svn_kmt ok."
     fi
 
     echo "Installation successful."
@@ -239,14 +259,20 @@ EOF
     fi
 
     if ! rm "$svn"; then
-        echo "remove svn failed!" && return 1
+        echo "remove $svn failed!" && return 1
+    else
+        echo "remove $svn ok."
     fi
 
     if ! mv "$svn_org" "$svn"; then
-        echo "move svn_org to svn failed!"
-        ln -s "svn_kmt" "$svn" || echo "Rollback: re-link svn to svn_kmt.sh failed!"
+        echo "move $svn_org to $svn failed!"
+        ln -s "svn_kmt" "$svn" && echo "Rollback: re-link $svn to $svn_kmt ok." || echo "Rollback: re-link $svn to $svn_kmt failed!"
         return 1
+    else
+        echo "move $svn_org to $svn ok."
     fi
+
+    rm -f "$svn_kmt" && echo "remove $svn_kmt ok" || echo "Warning: remove $svn_kmt failed, ignore it"
 
     echo "Uninstallation successful."
 
@@ -268,7 +294,7 @@ ext_upgrade()
             die "Original svn executable not found."
         fi
 
-        ext_install && echo "Upgrade successful." && return 0
+        ext_install "$@" && echo "Upgrade successful." && return 0
 
         echo "Upgrade failed."
 
@@ -439,63 +465,79 @@ get_versioned_timestamp() {
 
 get_files_2_commit()
 {
-    params=
-    for p in "$@"; do
-        if echo "$p" | grep -q "^-"; then
-            break
-        else
-            [ -z "$params" ] && params="${p}" || params="${params} ${p}"
-        fi
+    log "pc: $#"
+
+    for p in "$@";
+    do
+      log "p: $p"
     done
 
-    log "$params"
+    str=$(svn_call status "$@")
+    if [ $? != 0 ]; then
+        echo "Get status failed. $params"
+        return 1
+    fi
 
-    svn_call status "$params" |
-    {
-        while read -r flag rest
-        do
-            case "$flag" in
-                "?"|"X")
-                    continue
-                    ;;
-                *)
-                  log "$rest"
-                  ;;
-            esac
+    while read -r flag rest
+    do
+        case "$flag" in
+            "?"|"X")
+                continue
+                ;;
+            *)
+              log "$rest"
+              ;;
+        esac
 
-            file=$(echo "$rest" | sed 's/^ *//')
+        file=$(echo "$rest" | sed 's/^ *//')
 
-    #        log "found: $file"
+        log "found: $file"
 
-            if [ -f "$file" ]
-            then
-                echo "$file"
-            fi
+        if [ -f "$file" ]
+        then
+            echo "$file"
+        fi
 
-        done
-    }
+    done << EOF
+$str
+EOF
+
+    return 0
 }
 
-get_files_2_restore()
+get_versioned_files_list()
 {
     if [ $# -eq 0 ]
     then
         set -- .
     fi
 
-    svn_call ls -R "$@" |
-    {
+    for dir in "$@";
+    do
+        # svn ls -R returns paths relative to the given directory
+        str=$(svn_call ls -R "$dir")
+        if [ $? != 0 ]; then
+            echo "Get versioned files list failed"
+            return 1
+        fi
+
         while read -r rest
-        do
-            file=$(echo "$rest" | sed 's/^ *//')
+            do
+                file=$(echo "$rest" | sed 's/^ *//')
 
-            if [ -f "$file" ]
-            then
-                echo "$file"
-            fi
+                [ -f "$dir" ] && file=$dir || file="$dir/$file"
 
-        done
-    }
+                if [ -f "$file" ]; then
+                    echo "$file"
+                elif [ ! -d "$file" ]; then
+                    echo "Invalid file $rest"
+                    return 1
+                fi
+            done << EOF
+$str
+EOF
+    done
+    return 0
 }
 
 
@@ -508,140 +550,225 @@ get_files_2_restore()
 # 1 -- commit failed
 #
 # for the others mode
-# 0 -- no versioned files found
-# 1 -- versioned files checked
+# 0 -- exit by user
+# 1 -- more command by user
 
 complete_file_mtime()
 {
-  if [ $# = 0 ]; then
-      echo "Invalid mode"
-      return 1
-  fi
-
-  mode=$1
-  case $1 in
-    scan)
-        echo "Scanning SVN files..."
-        ;;
-    show_commit)
-        echo "Showing files to commit..."
-        ;;
-    show_completed)
-        echo "Showing completed files..."
-        ;;
-    show_working_copy)
-        echo "Showing working copy files..."
-        ;;
-    show_error)
-        echo "Showing error files..."
-        ;;
-    commit)
-        echo "Committing file:mtime metadata..."
-        ;;
-    *)
-        echo "Invalid mode $1"
+    if [ $# = 0 ]; then
+        echo "Invalid mode"
         return 1
-      ;;
+    fi
 
-  esac
+    cmd=$1
 
-  if [ $# = 1 ]
-  then
-      dir=.
-  else
-      dir=$2
-  fi
+    shift
 
-# svn ls -R returns paths relative to the given directory
+    if [ $# = 0 ]
+    then
+        set -- .
+    fi
 
-  svn_call ls -R "$dir" |
-      {
-          checked_count=0
-          already_set_count=0
-          to_commit_count=0
-          error_count=0
-          working_copy_count=0
+    while [ -n "$cmd" ]
+    do
+        echo ""
 
-          while read -r rest
-          do
-              file=$rest
+        case $cmd in
+            scan)
+                echo "Scanning SVN files..."
+                ;;
+            show_commit)
+                echo "Showing files to commit..."
+                ;;
+            show_completed)
+                echo "Showing completed files..."
+                ;;
+            show_working_copy)
+                echo "Showing working copy files..."
+                ;;
+            show_error)
+                echo "Showing error files..."
+                ;;
+            commit)
+                echo "Committing file:mtime metadata..."
+                ;;
+            *)
+                echo "Invalid command $cmd"
+                return 1
+              ;;
 
-              file="$dir/$file"
+        esac
 
-              if [ -f "$file" ]; then
+        checked_count=0
+        already_set_count=0
+        to_commit_count=0
+        error_count=0
+        working_copy_count=0
 
-                  checked_count=$(expr "${checked_count}" + 1)
+        str=$(get_versioned_files_list "$@")
+        if [ $? != 0 ]; then
+            echo "$str"
+            return 1
+        fi
 
-                  file_ts=$(get_file_mtime "$file")
-                  [ -z "$file_ts" ] && echo "get_file_mtime failed: $file" && error_count=$(expr "${error_count}" + 1) && continue
+        while read -r file
+        do
+            log "file: $file"
 
-                  prop_ts=$(svn_propget "$file")
-                  if [ -n "$prop_ts" ] && [ "$file_ts" = "$prop_ts" ]; then
+            if [ -f "$file" ]; then
 
-                      [ "$mode" = "show_completed" ] && echo "Completed $(format_timestamp "$file_ts") $file"
+                checked_count=$(expr "${checked_count}" + 1)
 
-                      already_set_count=$(expr "${already_set_count}" + 1)
+                file_ts=$(get_file_mtime "$file")
+                [ -z "$file_ts" ] && echo "get_file_mtime failed: $file" && error_count=$(expr "${error_count}" + 1) && continue
 
-                      continue
-                  fi
+                prop_ts=$(svn_propget "$file")
+                if [ -n "$prop_ts" ] && [ "$file_ts" = "$prop_ts" ]; then
 
-                  version_ts=$(get_versioned_timestamp "$file")
-                  if [ -z "$version_ts" ]; then
-                      [ "$mode" = "show_error" ] && echo "Error $(format_timestamp "$file_ts") $file"
-                      log "get_versioned_timestamp failed: $file"
-                      error_count=$(expr "${error_count}" + 1)
-                      continue
-                  fi
+                    [ "$cmd" = "show_completed" ] && echo "Completed $(format_timestamp "$file_ts") $file"
 
-                  if [ "$file_ts" -ge "$version_ts" ]; then
-                      [ "$mode" = "show_working_copy" ] && echo "Working Copy $(format_timestamp "$file_ts") $file"
+                    already_set_count=$(expr "${already_set_count}" + 1)
 
-                      working_copy_count=$(expr "${working_copy_count}" + 1)
+                    continue
+                fi
 
-                  else
-                      to_commit_count=$(expr "${to_commit_count}" + 1)
+                version_ts=$(get_versioned_timestamp "$file")
+                if [ -z "$version_ts" ]; then
+                    [ "$cmd" = "show_error" ] && echo "Error $(format_timestamp "$file_ts") $file"
+                    log "get_versioned_timestamp failed: $file"
+                    error_count=$(expr "${error_count}" + 1)
+                    continue
+                fi
 
-                      [ "$mode" = "show_commit" ] && echo "To Commit $(format_timestamp "$file_ts") $file"
+                if [ "$file_ts" -ge "$version_ts" ]; then
+                    [ "$cmd" = "show_working_copy" ] && echo "Working Copy $(format_timestamp "$file_ts") $file"
 
-                      if [ "$mode" = 'commit' ]; then
+                    working_copy_count=$(expr "${working_copy_count}" + 1)
 
-                          echo "Committing mtime $(format_timestamp $file_ts) $file"
+                else
+                    to_commit_count=$(expr "${to_commit_count}" + 1)
 
-                          save_a_file_mtime "$file" "$file_ts" || return 1
+                    [ "$cmd" = "show_commit" ] && echo "To Commit $(format_timestamp "$file_ts") $file"
 
-                      fi
-                  fi
+                    if [ "$cmd" = 'commit' ]; then
 
-              fi
-          done
+                        echo "Committing mtime $(format_timestamp $file_ts) $file"
 
-          skip_count=$(expr "${already_set_count}" + "${working_copy_count}" + "${error_count}")
+                        save_a_file_mtime "$file" "$file_ts" || return 1
 
-          if [ "$mode" = 'commit' ]; then
+                    fi
+                fi
+            else
+                if [ ! -d "$file" ]; then
+                    echo "Invalid file $file"
+                    return 1
+                fi
+            fi
 
-              [ "$to_commit_count" = 0 ] && echo "no files to commit" && exit "$checked_count"
+        done << EOF
+$str
+EOF
 
-              if svn_call commit "$@" -m 'complete file mtime'; then
-                  echo "Commit ${to_commit_count} files successful"
-                  return 0
-              else
-                  echo "Commit failed"
-                  return 1
-              fi
-          else
-              cat << EOF
-Done.
+        if [ "$cmd" = 'commit' ]; then
+
+            [ "$to_commit_count" = 0 ] && echo "No files to commit" && return 0
+
+            if svn_call commit "$@" -m 'complete file mtime'; then
+                echo "Commit ${to_commit_count} files successful"
+                return 0
+            fi
+
+            echo "Commit failed"
+        fi
+
+        show_result_and_get_command "$checked_count" "$already_set_count" "$working_copy_count" "$error_count" "$to_commit_count"
+        if [ $? = 0 ]; then
+            return 0
+        fi
+
+        if [ -z "$cmd" ]; then
+            echo "Invalid command: $cmd"
+        fi
+
+    done
+
+    return 0
+}
+
+show_result_and_get_command()
+{
+    checked_count=$1
+    already_set_count=$2
+    working_copy_count=$3
+    error_count=$4
+    to_commit_count=$5
+
+    skip_count=$(expr "${already_set_count}" + "${working_copy_count}" + "${error_count}")
+
+    cat << EOF
+    Done.
     Checked:   $checked_count
     Skip       $skip_count (Completed: $already_set_count, Working Copy: $working_copy_count, Error: $error_count)
     To Commit: $to_commit_count
 EOF
-              [ "$checked_count" -gt 0 ] && return 1 || return 0
-          fi
-      }
 
-      return $?
+    if [ "$checked_count" = "0" ]; then
+        log "no files"
+        return 0
+    fi
+
+    cat << EOF
+
+Select an operation:
+
+    1   -- Commit file:mtime metadata ($to_commit_count)
+    2   -- Rescan
+    3   -- Show files to commit ($to_commit_count)
+    4   -- Show completed files ($already_set_count)
+    5   -- Show working copy files ($working_copy_count)
+    6   -- Show error files ($error_count)
+
+  Other -- Exit
+
+EOF
+    read -r key
+
+    cmd=
+
+    case $key in
+
+        1)
+            cmd=commit
+        ;;
+
+        2)
+            cmd=scan
+        ;;
+
+        3)
+            cmd=show_commit
+        ;;
+
+        4)
+            cmd=show_completed
+        ;;
+
+        5)
+            cmd=show_working_copy
+        ;;
+
+        6)
+            cmd=show_error
+        ;;
+
+        *)
+            return 0
+        ;;
+
+    esac
+
+    return 1
 }
-
 
 ##############################################################################
 # Save File Mtime
@@ -688,30 +815,61 @@ save_a_file_mtime()
 
 save_file_mtime()
 {
-    log "save file mtime"
-
-    get_files_2_commit "$@" |
-    {
-        while read -r file
-        do
-            log "$file"
-
-            [ -z "$file" ] && continue
-
-            file_ts=$(get_file_mtime "$file")
-
-            [ -z "$file_ts" ] && echo "Get mtime failed $file" && return 1
-
-            if ! save_a_file_mtime "$file" "$file_ts"; then
-                echo "Set mtime $(format_timestamp "$file_ts") $file failed!"
-                return 1
+    log "save file mtime: $#"
+    params=
+    opt_key=
+    for p in "$@";
+    do
+        if echo "$p" | grep -q "^-"; then
+            opt_key=$p
+            #Skip option key
+            continue
+        elif [ "$opt_key" = '-m' ]; then
+            #Skip comment content
+            opt_key=
+            continue
+        else
+            if [ -n "$opt_key" ] && [ ! -e "$p" ]; then
+                #It is mostly a option value, skip it
+                opt_key=
+                continue
             fi
-        done
+            opt_key=
+        fi
 
-        return 0
-    }
+        [ -z "$params" ] && params="${p}" || params="${params}/"${p}""
+    done
 
-    return $?
+#    echo "params: $params"
+
+    old_ifs=$IFS
+    IFS='/'
+    read -r -a array <<< "$params"
+    IFS=$old_ifs
+
+    str=$(get_files_2_commit "${array[@]}")
+    if [ $? != 0 ]; then
+        return 1
+    fi
+
+    while read -r file
+    do
+        log "$file"
+
+        [ -z "$file" ] && continue
+
+        file_ts=$(get_file_mtime "$file")
+
+        [ -z "$file_ts" ] && echo "Get mtime failed $file" && return 1
+
+        if ! save_a_file_mtime "$file" "$file_ts"; then
+            echo "Set mtime $(format_timestamp "$file_ts") $file failed!"
+            return 1
+        fi
+    done << EOF
+$str
+EOF
+    return 0
 }
 
 ##############################################################################
@@ -743,36 +901,46 @@ restore_a_file_mtime()
 restore_file_mtime()
 {
     log "restore file mtime"
+    checked_count=0
     restore_count=0
     failed_count=0
-    get_files_2_restore "$@" |
-    {
-        while read -r file
-        do
-            file_ts=$(get_file_mtime "$file")
+    str=$(get_versioned_files_list "$@")
+    if [ $? != 0 ]; then
+        echo "$str"
+        return 1
+    fi
 
-            prop_ts=$(svn_propget "$file")
+    while read -r file
+    do
+        checked_count=$(expr "${checked_count}" + 1)
 
-            if [ -z "$prop_ts" ]; then
-                log "no property to restore"
-                continue
-            elif [ "$file_ts" = "$prop_ts" ]; then
-                log "already restored $file"
-                continue
-            fi
+        file_ts=$(get_file_mtime "$file")
 
-            if restore_a_file_mtime "$file" "$prop_ts"; then
-                echo "Restored mtime $(format_timestamp "$prop_ts") $file"
-                restore_count=$(expr "${restore_count}" + 1)
-            else
-                echo "Restore Failed $(format_timestamp "$prop_ts") $file"
-                failed_count=$(expr "${failed_count}" + 1)
-            fi
+        prop_ts=$(svn_propget "$file")
 
-        done
+        if [ -z "$prop_ts" ]; then
+            log "no property to restore"
+            continue
+        elif [ "$file_ts" = "$prop_ts" ]; then
+            log "already restored $file"
+            continue
+        fi
 
-        echo "Restore completed. Successful: $restore_count, Failed: ${failed_count}"
-    }
+        if restore_a_file_mtime "$file" "$prop_ts"; then
+            echo "Restored mtime $(format_timestamp "$prop_ts") $file"
+            restore_count=$(expr "${restore_count}" + 1)
+        else
+            echo "Restore Failed $(format_timestamp "$prop_ts") $file"
+            failed_count=$(expr "${failed_count}" + 1)
+        fi
+
+    done << EOF
+$str
+EOF
+
+    echo "Restore completed. Checked: $checked_count, Successful: $restore_count, Failed: ${failed_count}"
+
+    return 0
 }
 
 
@@ -821,12 +989,12 @@ command_handler()
     if [ "$cmd" = "commit" ]; then
         shift
         save_file_mtime "$@" || return 1
-        svn_call commit "$@" | on_read
+        svn_call "$cmd" "$@" | on_read
     else
         svn_call "$@" | on_read
     fi
 
-    ret=$?
+    ret=${PIPESTATUS[0]}
 
     log "$cmd completed $ret"
 
@@ -840,107 +1008,45 @@ command_handler()
 
 complete_file_mtime_handler()
 {
-    if [ $# -gt 1 ]; then
-        echo "Special one directory only" && return 1
+    for p in "$@"; do
+        [ ! -e "$p" ] && echo "$p is not a valid directory or file" && return 1
+    done
+
+    str=$(get_files_2_commit "$@")
+    if [ $? != 0 ]; then
+        return 1
     fi
 
-    for p in "$@"; do
-        [ ! -e "$p" ] && echo "$p is not a valid directory" && return 1
-    done
-
-    get_files_2_commit "$@" |
-    {
-        ret=0
-        while read -r file
-        do
+    ret=0
+    while read -r file
+    do
+        if [ -f "$file" ]; then
             echo "Uncommitted changes detected: $file"
             ret=1
-        done
-
-        if [ $ret = 1 ]; then
-            echo "Please commit your changes before running complete_file_mtime."
-            return 1
         fi
-
-    } || return 1
-
-    cmd=2
-
-    while [ -n "$cmd" ]
-    do
-        case $cmd in
-
-            1)
-                cmd=commit
-            ;;
-
-            2)
-                cmd=scan
-            ;;
-
-            3)
-                cmd=show_commit
-            ;;
-
-            4)
-                cmd=show_completed
-            ;;
-
-            5)
-                cmd=show_working_copy
-            ;;
-
-            6)
-                cmd=show_error
-            ;;
-
-            *)
-                return 0
-            ;;
-
-        esac
-
-        complete_file_mtime "$cmd" "$@"
-
-        ret=$?
-
-        log "ret: $ret"
-
-        if [ "$cmd" = "commit" ]; then
-            if [ "$ret" = 0 ]; then
-                return 0      #commit successfully, exit
-            fi
-        else
-            if [ "$ret" = 0 ]; then
-                return 0      #no files checked, exit
-            fi
-        fi
-
-        cat << EOF
-
-Select an operation:
-
-    1 -- Commit file:mtime metadata
-    2 -- Rescan
-    3 -- Show files to commit
-    4 -- Show completed files
-    5 -- Show working copy files
-    6 -- Show error files
-
-    Other -- Exit
-
+    done << EOF
+$str
 EOF
 
-        read -r cmd
+    if [ $ret = 1 ]; then
+        echo "Please commit your changes before running complete_file_mtime."
+        return 1
+    fi
 
-    done
+    complete_file_mtime "scan" "$@"
 
-    return 0
+    return $?
 }
 
 restore_file_mtime_handler()
 {
+    for p in "$@"; do
+        [ ! -e "$p" ] && echo "$p is not a valid directory or file" && return 1
+    done
+
     restore_file_mtime "$@"
+
+    return $?
 }
 
 ##############################################################################
@@ -1022,7 +1128,7 @@ dispatch()
 
             shift
 
-            ext_install
+            ext_install "$@"
 
             ;;
 
@@ -1067,6 +1173,7 @@ main()
     fi
 
     dispatch "$@"
+
 }
 
 main "$@"
