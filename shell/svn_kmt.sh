@@ -10,7 +10,7 @@
 #  Purpose:
 #      SVN client wrapper. designed to preserve file modification time (`mtime`)
 #      information during SVN operations.
-#operations.
+#
 #
 #  Version:
 #      0.5.6
