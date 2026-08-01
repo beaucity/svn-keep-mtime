@@ -13,7 +13,7 @@
 #
 #
 #  Version:
-#      0.5.7
+#      0.6.5
 #
 # ============================================================================
 
@@ -22,7 +22,7 @@
 # Configuration
 ##############################################################################
 
-SVN_KMT_VERSION="0.5.7"
+SVN_KMT_VERSION="0.6.5"
 
 FILE_MTIME_PROP="file:mtime"
 
@@ -35,15 +35,13 @@ PLATFORM=""
 # Utility
 ##############################################################################
 
-die()
-{
-    echo "svn_kmt: $*" >&2
-    exit 1
-}
-
 log()
 {
-    [ -n "$SVN_KMT_DEBUG" ] && echo "[svn_kmt] $*" >&2
+    ret=$?
+
+    [ -z "$SVN_KMT_DEBUG" ] || echo "[svn_kmt] $*" >&2
+
+    return $ret
 }
 
 ##############################################################################
@@ -63,13 +61,12 @@ detect_platform()
             ;;
 
         *)
-            die "unsupported platform"
+            echo "Unsupported platform"
+            return 1
             ;;
 
     esac
 }
-
-
 
 ##############################################################################
 # Original SVN Detection
@@ -90,66 +87,29 @@ detect_original_svn()
 {
     script_name=$(basename "$0")
 
-    script_dir="$(cd "$(dirname "$0")" && pwd)"
+    [ "$script_name" = "svn_kmt.sh" ] && SVN_KMT_DEBUG=1
 
-    case "$script_name" in
+    SVN=$(find_original_svn svn_org)
 
-        svn_kmt.sh)
+    if [ -z "$SVN" ]; then
+        SVN=$(find_original_svn svn)
+    fi
 
-            #
-            # Development mode
-            #
-
-            SVN_KMT_DEBUG=1
-
-            SVN=$(find_original_svn svn_org)
-
-            if [ -z "$SVN" ]; then
-                SVN=$(find_original_svn svn)
-            fi
-
-            if [ -z "$SVN" ]
-            then
-                die "Original svn executable not found."
-            fi
-
-            ;;
-
-        svn)
-
-            #
-            # Release mode
-            #
-
-            SVN="$script_dir/svn_org"
-
-            if [ ! -x "$SVN" ]
-            then
-                die "Original svn executable not found: $SVN"
-            fi
-
-            ;;
-
-        *)
-
-            SVN=$(find_original_svn svn)
-
-            if [ -z "$SVN" ]
-            then
-                die "Original svn executable not found"
-            fi
-
-            ;;
-
-    esac
+    if [ -z "$SVN" ]
+    then
+        echo "Original svn executable not found."
+        return 1
+    fi
 
     log "original svn: $SVN"
+
+    return 0
 }
 
 ext_install()
 {
 
-    [ "$(basename "$SVN")" = "svn_org" ] && echo "SVN Keep MTime is already installed" && return 1
+    [ "$(basename "$SVN")" = "svn_org" ] && echo "SVN Keep MTime is already installed." && return 1
 
     script_name=$(basename "$0")
     script_dir="$(cd "$(dirname "$0")" && pwd)"
@@ -170,13 +130,13 @@ ext_install()
     svn_org="$(dirname "$svn")/svn_org"
 
     if [ -e "$svn_org" ]; then
-        echo "Original svn backup already exists"
+        echo "Original svn backup already exists."
         return 1
     fi
 
     if [ -L "$svn" ]; then
         if [ "$(readlink "$svn")" = "$svn_kmt" ]; then
-            echo "SVN Keep MTime is already installed"
+            echo "SVN Keep MTime is already installed."
             return 1
         fi
     fi
@@ -187,14 +147,14 @@ ext_install()
                 echo "Link $svn_kmt -> $cp_from failed!"
                 return 1
             else
-                echo "Link $svn_kmt -> $cp_from ok."
+                echo "Linked $svn_kmt -> $cp_from successfully."
             fi
         else
             if ! cp "$cp_from" "$svn_kmt"; then
                 echo "Copy $cp_from to $svn_kmt failed!"
                 return 1
             else
-                echo "Copy $cp_from to $svn_kmt ok."
+                echo "Copy $cp_from to $svn_kmt successfully."
             fi
 
             if ! chmod +x "$svn_kmt"; then
@@ -202,7 +162,7 @@ ext_install()
                 rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
                 return 1
             else
-                echo "Add executable permission to $svn_kmt ok."
+                echo "Add executable permission to $svn_kmt successfully."
             fi
         fi
     fi
@@ -212,7 +172,7 @@ ext_install()
         rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
         return 1
     else
-        echo "Move $svn to $svn_org ok."
+        echo "Move $svn to $svn_org successfully."
     fi
 
     if ! ln -s "$svn_kmt" "$svn"; then
@@ -224,7 +184,7 @@ ext_install()
 
         return 1
     else
-        echo "Link $svn -> $svn_kmt ok."
+        echo "Linked $svn -> $svn_kmt successfully."
     fi
 
     echo "Installation successful."
@@ -242,7 +202,7 @@ EOF
         return 1
     fi
 
-    [ "$(basename "$SVN")" != "svn_org" ] && echo "svn_kmt not installed yet!" && return 1
+    [ "$(basename "$SVN")" != "svn_org" ] && echo "SVN Keep MTime is not installed yet." && return 1
 
     svn="$(dirname "$SVN")/svn"
     [ -z "$svn" ] && echo "svn not found" && return 1
@@ -251,28 +211,28 @@ EOF
     svn_org="$(dirname "$svn")/svn_org"
 
     if [ ! -L "$svn" ]; then
-        echo "svn_kmt not installed yet!" && return 1
+        echo "SVN Keep MTime is not installed yet." && return 1
     fi
 
     if [ "$(readlink "$svn")" != "$svn_kmt" ]; then
-        echo "svn_kmt not installed yet" && return 1
+        echo "SVN Keep MTime is not installed yet." && return 1
     fi
 
     if ! rm "$svn"; then
-        echo "remove $svn failed!" && return 1
+        echo "Remove $svn failed!" && return 1
     else
-        echo "remove $svn ok."
+        echo "Removed $svn successfully."
     fi
 
     if ! mv "$svn_org" "$svn"; then
-        echo "move $svn_org to $svn failed!"
-        ln -s "svn_kmt" "$svn" && echo "Rollback: re-link $svn to $svn_kmt ok." || echo "Rollback: re-link $svn to $svn_kmt failed!"
+        echo "Move $svn_org to $svn failed!"
+        ln -s "svn_kmt" "$svn" && echo "Rollback: re-linked $svn to $svn_kmt successfully." || echo "Rollback: re-link $svn to $svn_kmt failed!"
         return 1
     else
-        echo "move $svn_org to $svn ok."
+        echo "Moved $svn_org to $svn successfully."
     fi
 
-    rm -f "$svn_kmt" && echo "remove $svn_kmt ok" || echo "Warning: remove $svn_kmt failed, ignore it"
+    rm -f "$svn_kmt" && echo "Removed $svn_kmt successfully" || echo "Warning: remove $svn_kmt failed, ignore it"
 
     echo "Uninstallation successful."
 
@@ -285,13 +245,14 @@ ext_upgrade()
         echo "SVN Keep MTime is already installed, uninstall it ..."
 
         if ! svn ext-uninstall; then
-            echo "ext-upgrade failed."
+            echo "Upgrade failed."
             return 1
         fi
 
         SVN=$(find_original_svn svn)
         if [ -z "$SVN" ]; then
-            die "Original svn executable not found."
+            echo "Original svn executable not found."
+            return 1
         fi
 
         ext_install "$@" && echo "Upgrade successful." && return 0
@@ -465,28 +426,29 @@ get_versioned_timestamp() {
 
 get_files_2_commit()
 {
-    log "pc: $#"
-
-    for p in "$@";
-    do
-      log "p: $p"
-    done
+#    log "count: $#"
+#    for p in "$@";
+#    do
+#      log "p: $p"
+#    done
 
     str=$(svn_call status "$@")
     if [ $? != 0 ]; then
-        echo "Get status failed. $params"
+        echo "Failed to get SVN status. $params"
         return 1
     fi
 
-    while read -r flag rest
+    log "str: $str"
+
+    [ -n "$str" ] && while read -r flag rest
     do
         case "$flag" in
-            "?"|"X")
+            "?"|"X"|"D")
                 continue
                 ;;
             *)
-              log "$rest"
-              ;;
+                log "$rest"
+                ;;
         esac
 
         file=$(echo "$rest" | sed 's/^ *//')
@@ -521,7 +483,7 @@ get_versioned_files_list()
             return 1
         fi
 
-        while read -r rest
+        [ -n "$str" ] && while read -r rest
             do
                 file=$(echo "$rest" | sed 's/^ *//')
 
@@ -530,7 +492,7 @@ get_versioned_files_list()
                 if [ -f "$file" ]; then
                     echo "$file"
                 elif [ ! -d "$file" ]; then
-                    echo "Invalid file $rest"
+                    echo "Invalid file: $file, rest: $rest"
                     return 1
                 fi
             done << EOF
@@ -611,7 +573,7 @@ complete_file_mtime()
             return 1
         fi
 
-        while read -r file
+        [ -n "$str" ] && while read -r file
         do
             log "file: $file"
 
@@ -674,7 +636,7 @@ EOF
             [ "$to_commit_count" = 0 ] && echo "No files to commit" && return 0
 
             if svn_call commit "$@" -m 'complete file mtime'; then
-                echo "Commit ${to_commit_count} files successful"
+                echo "Committed ${to_commit_count} files successfully."
                 return 0
             fi
 
@@ -808,67 +770,76 @@ save_a_file_mtime()
           return 1
     fi
 
-    log "Set mtime $(format_timestamp "$file_ts") $file successful"
+    log "Set mtime $(format_timestamp "$file_ts") $file successfully"
 
     return 0
 }
 
 save_file_mtime()
 {
-    log "save file mtime: $#"
-    params=
+    files=
     opt_key=
+    has_dir=0
+
     for p in "$@";
     do
-        if echo "$p" | grep -q "^-"; then
-            opt_key=$p
-            #Skip option key
-            continue
-        elif [ "$opt_key" = '-m' ]; then
-            #Skip comment content
-            opt_key=
-            continue
-        else
-            if [ -n "$opt_key" ] && [ ! -e "$p" ]; then
-                #It is mostly a option value, skip it
-                opt_key=
+        case "$p" in
+            -*)
+                opt_key=$p
+                #Skip option key
                 continue
-            fi
-            opt_key=
-        fi
+            ;;
 
-        [ -z "$params" ] && params="${p}" || params="${params}/"${p}""
-    done
+            *)
+                if [ "$opt_key" = '-m' ]; then
+                  #Skip comment content
+                  opt_key=
+                  continue
+                else
+                    if [ -n "$opt_key" ] && [ ! -e "$p" ]; then
+                        #It is mostly a option value, skip it
+                        opt_key=
+                        continue
+                    fi
+                    opt_key=
+                fi
+            ;;
+        esac
 
-#    echo "params: $params"
+        has_dir=1
 
-    old_ifs=$IFS
-    IFS='/'
-    read -r -a array <<< "$params"
-    IFS=$old_ifs
+        str="$(get_files_2_commit "$p")"
 
-    str=$(get_files_2_commit "${array[@]}")
-    if [ $? != 0 ]; then
-        return 1
-    fi
-
-    while read -r file
-    do
-        log "$file"
-
-        [ -z "$file" ] && continue
-
-        file_ts=$(get_file_mtime "$file")
-
-        [ -z "$file_ts" ] && echo "Get mtime failed $file" && return 1
-
-        if ! save_a_file_mtime "$file" "$file_ts"; then
-            echo "Set mtime $(format_timestamp "$file_ts") $file failed!"
+        if [ $? != 0 ]; then
+            echo "$str"
             return 1
         fi
-    done << EOF
+
+        [ -n "$str" ] && while read -r file
+        do
+            log "$file"
+
+            [ -z "$file" ] && continue
+
+            file_ts=$(get_file_mtime "$file")
+
+            [ -z "$file_ts" ] && echo "Get mtime failed $file" && return 1
+
+            if ! save_a_file_mtime "$file" "$file_ts"; then
+                echo "Set mtime $(format_timestamp "$file_ts") $file failed!"
+                return 1
+            fi
+        done << EOF
 $str
 EOF
+    done
+
+    if [ $has_dir = 0 ]; then
+        if [ "$#" -gt 1 ]; then     #prevert death loop
+           ! save_file_mtime "." || return 1
+        fi
+    fi
+
     return 0
 }
 
@@ -910,7 +881,7 @@ restore_file_mtime()
         return 1
     fi
 
-    while read -r file
+    [ -n "$str" ] && while read -r file
     do
         checked_count=$(expr "${checked_count}" + 1)
 
@@ -954,7 +925,7 @@ on_read()
     while read -r flag rest
     do
         case "$flag" in
-#            GU   --??
+#           GU   --??
             A|U|UU|Restored|Reverted|Sending)
 
                 file="$rest"
@@ -978,6 +949,8 @@ on_read()
         echo "$flag $rest"
 
     done
+
+    return 0
 }
 
 command_handler()
@@ -989,12 +962,24 @@ command_handler()
     if [ "$cmd" = "commit" ]; then
         shift
         save_file_mtime "$@" || return 1
-        svn_call "$cmd" "$@" | on_read
+        if ! str=$(svn_call "$cmd" "$@"); then
+            echo "$str"
+            return 1
+        fi
     else
-        svn_call "$@" | on_read
+        if ! str=$(svn_call "$@"); then
+            echo "$str"
+            return 1
+        fi
     fi
 
-    ret=${PIPESTATUS[0]}
+    if [ -n "$str" ]; then
+      on_read <<EOF
+$str
+EOF
+    fi
+
+    ret=$?
 
     log "$cmd completed $ret"
 
@@ -1014,21 +999,22 @@ complete_file_mtime_handler()
 
     str=$(get_files_2_commit "$@")
     if [ $? != 0 ]; then
+        echo "$str"
         return 1
     fi
 
-    ret=0
-    while read -r file
+    has_uncommitted=0
+    [ -n "$str" ] && while read -r file
     do
         if [ -f "$file" ]; then
             echo "Uncommitted changes detected: $file"
-            ret=1
+            has_uncommitted=1
         fi
     done << EOF
 $str
 EOF
 
-    if [ $ret = 1 ]; then
+    if [ $has_uncommitted = 1 ]; then
         echo "Please commit your changes before running complete_file_mtime."
         return 1
     fi
@@ -1065,6 +1051,12 @@ show_version()
 
 dispatch()
 {
+    if [ $# -eq 0 ]
+    then
+        exec "$SVN"
+        return $?
+    fi
+
     cmd="$1"
 
     case "$cmd" in
@@ -1155,6 +1147,7 @@ dispatch()
             ;;
 
     esac
+
 }
 
 ##############################################################################
@@ -1163,17 +1156,11 @@ dispatch()
 
 main()
 {
-    detect_platform
+    detect_platform || return 1
 
-    detect_original_svn
-
-    if [ $# -eq 0 ]
-    then
-        exec "$SVN"
-    fi
+    detect_original_svn || return 1
 
     dispatch "$@"
-
 }
 
 main "$@"
