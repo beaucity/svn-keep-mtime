@@ -426,19 +426,11 @@ get_versioned_timestamp() {
 
 get_files_2_commit()
 {
-#    log "count: $#"
-#    for p in "$@";
-#    do
-#      log "p: $p"
-#    done
-
-    str=$(svn_call status "$@")
-    if [ $? != 0 ]; then
-        echo "Failed to get SVN status. $params"
+    if ! str=$(svn_call status "$@"); then
+        echo "$str"
+        log "Failed to get SVN status."
         return 1
     fi
-
-    log "str: $str"
 
     [ -n "$str" ] && while read -r flag rest
     do
@@ -453,7 +445,7 @@ get_files_2_commit()
 
         file=$(echo "$rest" | sed 's/^ *//')
 
-        log "found: $file"
+#        log "found: $file"
 
         if [ -f "$file" ]
         then
@@ -477,9 +469,10 @@ get_versioned_files_list()
     for dir in "$@";
     do
         # svn ls -R returns paths relative to the given directory
-        str=$(svn_call ls -R "$dir")
-        if [ $? != 0 ]; then
-            echo "Get versioned files list failed"
+
+        if ! str=$(svn_call ls -R "$dir"); then
+            echo "$str"
+            log "Get versioned files list failed"
             return 1
         fi
 
@@ -753,6 +746,7 @@ save_a_file_mtime()
     if [ -n "$old" ]; then
         if [ "$old" = "$file_ts" ]
         then
+            log "same mtime: $file"
             return 0
         fi
 
@@ -770,14 +764,13 @@ save_a_file_mtime()
           return 1
     fi
 
-    log "Set mtime $(format_timestamp "$file_ts") $file successfully"
+    log "Set mtime $(format_timestamp "$file_ts") $file successfully."
 
     return 0
 }
 
 save_file_mtime()
 {
-    files=
     opt_key=
     has_dir=0
 
@@ -808,16 +801,15 @@ save_file_mtime()
 
         has_dir=1
 
-        str="$(get_files_2_commit "$p")"
-
-        if [ $? != 0 ]; then
-            echo "$str"
+        if ! str="$(get_files_2_commit "$p")"; then
+#            echo "$str"
+            echo "Failed to get files list to commit"
             return 1
         fi
 
         [ -n "$str" ] && while read -r file
         do
-            log "$file"
+#            log "$file"
 
             [ -z "$file" ] && continue
 
@@ -836,7 +828,7 @@ EOF
 
     if [ $has_dir = 0 ]; then
         if [ "$#" -gt 1 ]; then     #prevert death loop
-           ! save_file_mtime "." || return 1
+            save_file_mtime "." || return 1
         fi
     fi
 
@@ -1136,7 +1128,7 @@ dispatch()
 
             shift
 
-            ext_upgrade
+            ext_upgrade "$@"
 
             ;;
 
