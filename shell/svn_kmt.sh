@@ -846,15 +846,10 @@ restore_a_file_mtime()
 
     [ -z "$prop_ts" ] && return 1
 
-    set_file_mtime \
-        "$file" \
-        "$prop_ts"
-
-    ret=$?
-    if [ $ret != 0 ]; then
-        log "set_file_mtime failed $file, $prop_ts"
+    if ! set_file_mtime "$file" "$prop_ts"; then
+        log "Failed to restore mtime $(format_timestamp "$prop_ts") $file"
     else
-        log "Restored mtime $file, $(format_timestamp "$prop_ts")"
+        log "Restored mtime $(format_timestamp "$prop_ts") $file successfully"
     fi
 
     return $ret
