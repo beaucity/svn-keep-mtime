@@ -560,8 +560,7 @@ complete_file_mtime()
         error_count=0
         working_copy_count=0
 
-        str=$(get_versioned_files_list "$@")
-        if [ $? != 0 ]; then
+        if ! str=$(get_versioned_files_list "$@"); then
             echo "$str"
             return 1
         fi
@@ -802,8 +801,8 @@ save_file_mtime()
         has_dir=1
 
         if ! str="$(get_files_2_commit "$p")"; then
-#            echo "$str"
-            echo "Failed to get files list to commit"
+            echo "$str"
+            log "Failed to get files list to commit"
             return 1
         fi
 
@@ -867,8 +866,7 @@ restore_file_mtime()
     checked_count=0
     restore_count=0
     failed_count=0
-    str=$(get_versioned_files_list "$@")
-    if [ $? != 0 ]; then
+    if ! str=$(get_versioned_files_list "$@"); then
         echo "$str"
         return 1
     fi
@@ -989,8 +987,7 @@ complete_file_mtime_handler()
         [ ! -e "$p" ] && echo "$p is not a valid directory or file" && return 1
     done
 
-    str=$(get_files_2_commit "$@")
-    if [ $? != 0 ]; then
+    if ! str=$(get_files_2_commit "$@"); then
         echo "$str"
         return 1
     fi
