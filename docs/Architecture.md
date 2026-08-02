@@ -107,7 +107,7 @@ The original executable is never modified.
 Installation command:
 
 ``` bash
-./svn_kmt.sh ext-install
+./svn_kmt.sh kmt-install
 ```
 
 Before installation:
@@ -135,7 +135,7 @@ All normal SVN commands are handled by `svn_kmt.sh`.
 Upgrade command:
 
 ``` bash
-./svn_kmt.sh ext-upgrade
+./svn_kmt.sh kmt-upgrade
 ```
 
 The upgrade command must be executed from the new `svn_kmt.sh` file.
@@ -143,7 +143,7 @@ The upgrade command must be executed from the new `svn_kmt.sh` file.
 It is intentionally not:
 
 ``` bash
-svn ext-upgrade
+svn kmt-upgrade
 ```
 
 because the installed `svn` command may still point to the old wrapper
@@ -154,16 +154,16 @@ Upgrade process:
     New svn_kmt.sh
             |
             v
-    ext-upgrade
+    kmt-upgrade
             |
             v
-    ext-uninstall
+    kmt-uninstall
             |
             v
     restore original SVN
             |
             v
-    ext-install
+    kmt-install
             |
             v
     new wrapper installed
@@ -269,7 +269,7 @@ Migration is optional and can be performed when required.
 ### Version
 
 ``` bash
-svn ext-version
+svn kmt-version
 ```
 
 Display SVN Keep MTime version.
@@ -306,7 +306,7 @@ Restore file modification time from SVN properties.
 ### Install
 
 ``` bash
-./svn_kmt.sh ext-install
+./svn_kmt.sh kmt-install
 ```
 
 Install SVN Keep MTime.
@@ -316,7 +316,7 @@ Install SVN Keep MTime.
 ### Upgrade
 
 ``` bash
-./svn_kmt.sh ext-upgrade
+./svn_kmt.sh kmt-upgrade
 ```
 
 Upgrade SVN Keep MTime.
@@ -326,7 +326,7 @@ Upgrade SVN Keep MTime.
 ### Uninstall
 
 ``` bash
-svn ext-uninstall
+svn kmt-uninstall
 ```
 
 Remove SVN Keep MTime.

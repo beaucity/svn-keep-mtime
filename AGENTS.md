@@ -97,7 +97,7 @@ Before running `complete_file_mtime`:
 
 ### Install
 
-    ./svn_kmt.sh ext-install
+    ./svn_kmt.sh kmt-install
 
 Responsibilities:
 
@@ -108,29 +108,29 @@ Responsibilities:
 
 ### Upgrade
 
-    ./svn_kmt.sh ext-upgrade
+    ./svn_kmt.sh kmt-upgrade
 
 Upgrade must be executed from the new `svn_kmt.sh`.
 
 Do not use:
 
-    svn ext-upgrade
+    svn kmt-upgrade
 
 because the installed wrapper may be an older version.
 
 Upgrade workflow:
 
-    ext-uninstall
+    kmt-uninstall
             |
             v
     restore original SVN
             |
             v
-    ext-install
+    kmt-install
 
 ### Uninstall
 
-    svn ext-uninstall
+    svn kmt-uninstall
 
 Restore the original SVN executable.
 
@@ -138,7 +138,7 @@ The uninstall operation must be executed through the installed SVN wrapper.
 
 Do not use:
 
-./svn_kmt.sh ext-uninstall
+./svn_kmt.sh kmt-uninstall
 
 because the script may not be the active installed version.
 

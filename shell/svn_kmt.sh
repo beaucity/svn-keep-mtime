@@ -13,7 +13,7 @@
 #
 #
 #  Version:
-#      0.6.5
+#      0.6.6
 #
 # ============================================================================
 
@@ -22,7 +22,7 @@
 # Configuration
 ##############################################################################
 
-SVN_KMT_VERSION="0.6.5"
+SVN_KMT_VERSION="0.6.6"
 
 FILE_MTIME_PROP="file:mtime"
 
@@ -106,7 +106,7 @@ detect_original_svn()
     return 0
 }
 
-ext_install()
+kmt_install()
 {
 
     [ "$(basename "$SVN")" = "svn_org" ] && echo "SVN Keep MTime is already installed." && return 1
@@ -118,7 +118,7 @@ ext_install()
 
     if [ "$script_name" != "svn_kmt.sh" ]; then
         printf "Please run the command as follows:
-        ./svn_kmt.sh ext-install
+        ./svn_kmt.sh kmt-install
         "
         return 1
     fi
@@ -192,12 +192,12 @@ ext_install()
     return 0
 }
 
-ext_uninstall()
+kmt_uninstall()
 {
     if [ "$(basename "$0")" != "svn" ]; then
         cat << EOF
 Please run the command as follows:
-  svn ext-uninstall
+  svn kmt-uninstall
 EOF
         return 1
     fi
@@ -239,12 +239,12 @@ EOF
     return 0
 }
 
-ext_upgrade()
+kmt_upgrade()
 {
     if [ "$(basename "$SVN")" = "svn_org" ]; then
         echo "SVN Keep MTime is already installed, uninstall it ..."
 
-        if ! svn ext-uninstall; then
+        if ! svn kmt-uninstall; then
             echo "Upgrade failed."
             return 1
         fi
@@ -255,14 +255,14 @@ ext_upgrade()
             return 1
         fi
 
-        ext_install "$@" && echo "Upgrade successful." && return 0
+        kmt_install "$@" && echo "Upgrade successful." && return 0
 
         echo "Upgrade failed."
 
         return 1
     else
         echo "SVN Keep MTime is not installed, installing now."
-        ext_install && return 0 || return 1
+        kmt_install && return 0 || return 1
     fi
 }
 
@@ -285,7 +285,7 @@ svn_call()
 }
 
 
-svn_propget()
+svn_prop_get()
 {
     svn_call propget \
         "$FILE_MTIME_PROP" \
@@ -293,7 +293,7 @@ svn_propget()
 }
 
 
-svn_propset()
+svn_prop_set()
 {
     svn_call propset \
         "$FILE_MTIME_PROP" \
@@ -309,12 +309,6 @@ svn_propset()
 is_timestamp()
 {
     echo "$1" | grep -Eq '^[0-9]+$'
-}
-
-get_timestamp()
-{
-    tm=$1
-    date -j -f "%Y-%m-%d %H:%M:%S %z" "$tm" +%s
 }
 
 format_timestamp()
@@ -350,15 +344,20 @@ get_file_mtime()
 
         linux)
 
-            stat -c %Y "$file"
+            if ! stat -c %Y "$file"; then
+                echo "file: '$file'"
+                return 1
+            fi
             ;;
 
 
         macos)
 
-            stat -f %m "$file"
+            if ! stat -f %m "$file"; then
+                echo "file: '$file'"
+                return 1
+            fi
             ;;
-
 
         *)
 
@@ -366,6 +365,8 @@ get_file_mtime()
             ;;
 
     esac
+
+    return 0
 }
 
 set_file_mtime()
@@ -432,10 +433,11 @@ get_files_2_commit()
         return 1
     fi
 
-    [ -n "$str" ] && while read -r flag rest
+    [ -n "$str" ] && while IFS= read -r line
     do
+        flag=$(echo "$line" | cut -c 1-2)
         case "$flag" in
-            "?"|"X"|"D")
+            \?*|X*|D*)
                 continue
                 ;;
             *)
@@ -443,14 +445,22 @@ get_files_2_commit()
                 ;;
         esac
 
-        file=$(echo "$rest" | sed 's/^ *//')
+        log "line: '$line'"
+
+#        rest=$(echo "$line" | cut -c 3-)
+
+        file=$(echo "$line" | sed 's/^\w* *//')
 
 #        log "found: $file"
-
-        if [ -f "$file" ]
-        then
-            echo "$file"
+        if [ ! -f "$file" ]; then
+            file=$(echo "$line" | cut -c 9-)
+            if [ ! -f "$file" ]; then
+                echo "Invalid working file: '$file'"
+                return 1
+            fi
         fi
+
+        echo "$file"
 
     done << EOF
 $str
@@ -476,16 +486,17 @@ get_versioned_files_list()
             return 1
         fi
 
-        [ -n "$str" ] && while read -r rest
+        [ -n "$str" ] && while IFS= read -r rest
             do
-                file=$(echo "$rest" | sed 's/^ *//')
+#                file=$(echo "$rest" | sed 's/^ *//')
+                file=$rest
 
                 [ -f "$dir" ] && file=$dir || file="$dir/$file"
 
                 if [ -f "$file" ]; then
                     echo "$file"
                 elif [ ! -d "$file" ]; then
-                    echo "Invalid file: $file, rest: $rest"
+                    echo "Invalid file: '$file', rest: '$rest'"
                     return 1
                 fi
             done << EOF
@@ -565,7 +576,7 @@ complete_file_mtime()
             return 1
         fi
 
-        [ -n "$str" ] && while read -r file
+        [ -n "$str" ] && while IFS= read -r file
         do
             log "file: $file"
 
@@ -573,10 +584,14 @@ complete_file_mtime()
 
                 checked_count=$(expr "${checked_count}" + 1)
 
-                file_ts=$(get_file_mtime "$file")
+                if ! file_ts=$(get_file_mtime "$file"); then
+                    echo "$file_ts"
+                    return 1
+                fi
+
                 [ -z "$file_ts" ] && echo "get_file_mtime failed: $file" && error_count=$(expr "${error_count}" + 1) && continue
 
-                prop_ts=$(svn_propget "$file")
+                prop_ts=$(svn_prop_get "$file")
                 if [ -n "$prop_ts" ] && [ "$file_ts" = "$prop_ts" ]; then
 
                     [ "$cmd" = "show_completed" ] && echo "Completed $(format_timestamp "$file_ts") $file"
@@ -606,7 +621,7 @@ complete_file_mtime()
 
                     if [ "$cmd" = 'commit' ]; then
 
-                        echo "Committing mtime $(format_timestamp $file_ts) $file"
+                        echo "Committing mtime $(format_timestamp "$file_ts") $file"
 
                         save_a_file_mtime "$file" "$file_ts" || return 1
 
@@ -614,7 +629,7 @@ complete_file_mtime()
                 fi
             else
                 if [ ! -d "$file" ]; then
-                    echo "Invalid file $file"
+                    echo "Invalid file '$file'"
                     return 1
                 fi
             fi
@@ -635,8 +650,7 @@ EOF
             echo "Commit failed"
         fi
 
-        show_result_and_get_command "$checked_count" "$already_set_count" "$working_copy_count" "$error_count" "$to_commit_count"
-        if [ $? = 0 ]; then
+        if show_result_and_get_command "$checked_count" "$already_set_count" "$working_copy_count" "$error_count" "$to_commit_count"; then
             return 0
         fi
 
@@ -740,7 +754,7 @@ save_a_file_mtime()
 
 #    [ -n "$file" ] && echo "test false" && return 1 #for test
 
-    old=$(svn_propget "$file")
+    old=$(svn_prop_get "$file")
 
     if [ -n "$old" ]; then
         if [ "$old" = "$file_ts" ]
@@ -755,7 +769,7 @@ save_a_file_mtime()
         fi
     fi
 
-    if ! svn_propset \
+    if ! svn_prop_set \
         "$file" \
         "$file_ts" \
         >/dev/null  ; then
@@ -805,14 +819,18 @@ save_file_mtime()
             log "Failed to get files list to commit"
             return 1
         fi
-
-        [ -n "$str" ] && while read -r file
+        log "str: '$str'"
+        [ -n "$str" ] && while IFS= read -r file
         do
-#            log "$file"
+            log "line: '$file'"
 
             [ -z "$file" ] && continue
 
-            file_ts=$(get_file_mtime "$file")
+            if ! file_ts=$(get_file_mtime "$file"); then
+                echo "$file_ts"
+                echo "'$file'"
+                return 1
+            fi
 
             [ -z "$file_ts" ] && echo "Get mtime failed $file" && return 1
 
@@ -870,9 +888,12 @@ restore_file_mtime()
     do
         checked_count=$(expr "${checked_count}" + 1)
 
-        file_ts=$(get_file_mtime "$file")
+        if ! file_ts=$(get_file_mtime "$file"); then
+            echo "$file_ts"
+            return 1
+        fi
 
-        prop_ts=$(svn_propget "$file")
+        prop_ts=$(svn_prop_get "$file")
 
         if [ -z "$prop_ts" ]; then
             log "no property to restore"
@@ -907,31 +928,69 @@ EOF
 
 on_read()
 {
-    while read -r flag rest
+#    while IFS= read -r line
+#    while read -r flag rest
+    while IFS= read -r line
     do
+        flag=$(echo "$line" | cut -d ' ' -f 1)
+        rest=$(echo "$line" | sed 's/^[^ ]*//')
+
+
+
         case "$flag" in
 #           GU   --??
-            A|U|UU|Restored|Reverted|Sending)
+            A|AA|AU|U|UU|Restored|Reverted|Sending|Adding)
 
-                file="$rest"
+                file=$(echo "$rest" | sed "s/^ *//")
 
-                [ "$flag" = "Restored" ] || [ "$flag" = "Reverted" ]  && file=$(echo "$file" | sed "s/^'//; s/'$//")
+                log "flag: '$flag', rest: '$rest', file: '$file'"
 
-                prop_ts=$(svn_propget "$file")
+                if [ ! -f "$file" ]; then
+                    case "$flag" in
+                        Restored|Reverted)
+                            file=$(echo "$file" | sed "s/^'//; s/'$//")
+                            ;;
 
-                is_timestamp "$prop_ts" || continue
+                        Sending|Adding)
+                            file=$(echo "$line" | cut -c 16-)
+                            ;;
 
-                if [ "$flag" != "Sending" ]; then
+                    esac
+
+                    if [ ! -f "$file" ]; then
+                        echo "File not exists '$file'"
+                        log "line: '$line'"
+                        return 1
+                    fi
+
+                fi
+
+                if ! prop_ts=$(svn_prop_get "$file"); then
+                    if [ "$flag" = "Sending" ] || [ "$flag" = "Adding" ]; then
+                        echo "$prop_ts"
+                        log "Get file:mtime failed '$file'"
+                        return 1
+                    else
+                        continue
+                    fi
+                fi
+
+                log "Process timestamp $prop_ts '$file'"
+
+                ! is_timestamp "$prop_ts" && echo "Invalid timestamp $prop_ts '$file'" && return 1
+
+                if [ "$flag" != "Sending" ] && [ "$flag" != "Adding" ]; then
                     restore_a_file_mtime "$file" "$prop_ts" || return 1
                 fi
 
                 rest="$(format_timestamp "$prop_ts") $rest"
-
+                echo "$flag $rest"
                 ;;
+            *)
 
+                echo "$line"
+                ;;
         esac
-
-        echo "$flag $rest"
 
     done
 
@@ -958,11 +1017,11 @@ command_handler()
         fi
     fi
 
-    if [ -n "$str" ]; then
-      on_read <<EOF
+    [ -z "$str" ] && return 0
+
+    on_read << EOF
 $str
 EOF
-    fi
 
     ret=$?
 
@@ -1003,9 +1062,8 @@ EOF
         return 1
     fi
 
-    complete_file_mtime "scan" "$@"
+    complete_file_mtime "scan" "$@" && return 0 || return 1
 
-    return $?
 }
 
 restore_file_mtime_handler()
@@ -1014,9 +1072,8 @@ restore_file_mtime_handler()
         [ ! -e "$p" ] && echo "$p is not a valid directory or file" && return 1
     done
 
-    restore_file_mtime "$@"
+    restore_file_mtime "$@" && return 0 || return 1
 
-    return $?
 }
 
 ##############################################################################
@@ -1094,33 +1151,33 @@ dispatch()
 
             ;;
 
-        ext-version)
+        kmt-version)
 
             show_version
 
             ;;
 
-        ext-install)
+        kmt-install)
 
             shift
 
-            ext_install "$@"
+            kmt_install "$@"
 
             ;;
 
-        ext-uninstall)
+        kmt-uninstall)
 
             shift
 
-            ext_uninstall
+            kmt_uninstall
 
             ;;
 
-        ext-upgrade)
+        kmt-upgrade)
 
             shift
 
-            ext_upgrade "$@"
+            kmt_upgrade "$@"
 
             ;;
 
