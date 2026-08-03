@@ -118,7 +118,7 @@ requirements.
 Use:
 
 ``` bash
-svn complete_file_mtime
+svn kmt_complete
 ```
 
 to create `file:mtime` properties from the current working copy.
@@ -132,7 +132,7 @@ Before running:
 After the metadata has been stored:
 
 ``` bash
-svn restore_file_mtime
+svn kmt_restore
 ```
 
 can restore file modification times from SVN properties.
@@ -155,7 +155,7 @@ SVN Keep MTime automatically:
 -   Saves file mtime during commit
 -   Restores file mtime during update and checkout
 
-Users do not need to manually run `restore_file_mtime` during normal
+Users do not need to manually run `kmt_restore` during normal
 operation.
 
 ## Commands
@@ -169,13 +169,13 @@ svn kmt-version
 Complete existing file mtime:
 
 ``` bash
-svn complete_file_mtime
+svn kmt_complete
 ```
 
 Restore file mtime:
 
 ``` bash
-svn restore_file_mtime
+svn kmt_restore
 ```
 
 Install:

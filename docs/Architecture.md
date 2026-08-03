@@ -239,7 +239,7 @@ Migration:
 Generate mtime metadata:
 
 ``` bash
-svn complete_file_mtime
+svn kmt_complete
 ```
 
 This reads current file timestamps and creates:
@@ -253,7 +253,7 @@ properties.
 Restore timestamps on other clients:
 
 ``` bash
-svn restore_file_mtime
+svn kmt_restore
 ```
 
 The timestamp information is restored from SVN properties.
@@ -279,7 +279,7 @@ Display SVN Keep MTime version.
 ### Complete mtime
 
 ``` bash
-svn complete_file_mtime
+svn kmt_complete
 ```
 
 Create `file:mtime` properties for existing files.
@@ -294,7 +294,7 @@ Requirements:
 ### Restore mtime
 
 ``` bash
-svn restore_file_mtime
+svn kmt_restore
 ```
 
 Restore file modification time from SVN properties.

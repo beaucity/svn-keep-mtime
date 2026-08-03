@@ -77,17 +77,17 @@ Rules:
 
 Migration commands:
 
-    svn complete_file_mtime
-    svn restore_file_mtime
+    svn kmt_complete
+    svn kmt_restore
 
 Rules:
 
 -   Migration is optional.
 -   It is not required for normal daily usage.
--   `complete_file_mtime` only manages mtime metadata.
+-   `kmt_complete` only manages mtime metadata.
 -   It must not encourage users to commit unrelated file changes.
 
-Before running `complete_file_mtime`:
+Before running `kmt_complete`:
 
 -   Working copy must not contain uncommitted changes.
 

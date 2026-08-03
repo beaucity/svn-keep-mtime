@@ -13,7 +13,7 @@
 #
 #
 #  Version:
-#      0.6.6
+#      0.6.7
 #
 # ============================================================================
 
@@ -22,7 +22,7 @@
 # Configuration
 ##############################################################################
 
-SVN_KMT_VERSION="0.6.6"
+SVN_KMT_VERSION="0.6.7"
 
 FILE_MTIME_PROP="file:mtime"
 
@@ -154,7 +154,7 @@ kmt_install()
                 echo "Copy $cp_from to $svn_kmt failed!"
                 return 1
             else
-                echo "Copy $cp_from to $svn_kmt successfully."
+                echo "Copied $cp_from to $svn_kmt successfully."
             fi
 
             if ! chmod +x "$svn_kmt"; then
@@ -162,7 +162,7 @@ kmt_install()
                 rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
                 return 1
             else
-                echo "Add executable permission to $svn_kmt successfully."
+                echo "Added executable permission to $svn_kmt successfully."
             fi
         fi
     fi
@@ -172,7 +172,7 @@ kmt_install()
         rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
         return 1
     else
-        echo "Move $svn to $svn_org successfully."
+        echo "Moved $svn to $svn_org successfully."
     fi
 
     if ! ln -s "$svn_kmt" "$svn"; then
@@ -195,6 +195,8 @@ kmt_install()
 kmt_uninstall()
 {
     if [ "$(basename "$0")" != "svn" ]; then
+      # Uninstall must be executed through the active svn wrapper
+      # to avoid removing a different version of svn_kmt.sh.
         cat << EOF
 Please run the command as follows:
   svn kmt-uninstall
@@ -273,7 +275,8 @@ kmt_upgrade()
 svn_call()
 {
     log "svn_org: $SVN $*"
-
+    # Force English SVN output because status parsing depends on
+    # the status format.
     case "$1" in
         update|up|checkout|co|revert|switch)
             LC_MESSAGES=C "$SVN" --config-option config:miscellany:use-commit-times=yes "$@"
@@ -1058,7 +1061,7 @@ $str
 EOF
 
     if [ $has_uncommitted = 1 ]; then
-        echo "Please commit your changes before running complete_file_mtime."
+        echo "Please commit your changes before running kmt_complete."
         return 1
     fi
 
@@ -1135,7 +1138,7 @@ dispatch()
 
             ;;
 
-        complete_file_mtime)
+        kmt_complete)
 
             shift
 
@@ -1143,7 +1146,7 @@ dispatch()
 
             ;;
 
-        restore_file_mtime)
+        kmt_restore)
 
             shift
 
