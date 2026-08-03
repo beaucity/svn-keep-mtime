@@ -564,6 +564,9 @@ complete_file_mtime()
             show_commit)
                 echo "Showing files to commit..."
                 ;;
+            show_restore)
+                echo "Showing files to commit..."
+                ;;
             show_completed)
                 echo "Showing completed files..."
                 ;;
