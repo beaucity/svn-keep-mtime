@@ -576,6 +576,9 @@ complete_file_mtime()
             commit)
                 echo "Committing file:mtime metadata..."
                 ;;
+            restore)
+                echo "Restoring file:mtime metadata..."
+                ;;
             *)
                 echo "Invalid command $cmd"
                 return 1
@@ -586,6 +589,7 @@ complete_file_mtime()
         checked_count=0
         already_set_count=0
         to_commit_count=0
+        to_restore_count=0
         error_count=0
         working_copy_count=0
 
@@ -630,19 +634,30 @@ complete_file_mtime()
                 if [ "$file_ts" -ge "$version_ts" ]; then
                     [ "$cmd" = "show_working_copy" ] && echo "Working Copy $(format_timestamp "$file_ts") $file"
 
-                    working_copy_count=$(expr "${working_copy_count}" + 1)
-
+                    if [ -n "$file_ts" ] && [ "$prop_ts" -lt "$file_ts" ]; then
+                        if [ "$cmd" = 'restore' ]; then
+                            restore_a_file_mtime "$file" "$prop_ts" || return 1
+                            already_set_count=$(expr "${already_set_count}" + 1)
+                        else
+                            [ "$cmd" = "show_restore" ] && echo "To Restore $(format_timestamp "$file_ts") $file"
+                            to_restore_count=$(expr "${to_restore_count}" + 1)
+                        fi
+                    else
+                        working_copy_count=$(expr "${working_copy_count}" + 1)
+                    fi
                 else
-                    to_commit_count=$(expr "${to_commit_count}" + 1)
-
-                    [ "$cmd" = "show_commit" ] && echo "To Commit $(format_timestamp "$file_ts") $file"
-
                     if [ "$cmd" = 'commit' ]; then
 
                         echo "Committing mtime $(format_timestamp "$file_ts") $file"
 
                         save_a_file_mtime "$file" "$file_ts" || return 1
 
+                        already_set_count=$(expr "${already_set_count}" + 1)
+                    else
+
+                        [ "$cmd" = "show_commit" ] && echo "To Commit $(format_timestamp "$file_ts") $file"
+
+                        to_commit_count=$(expr "${to_commit_count}" + 1)
                     fi
                 fi
             else
@@ -668,7 +683,7 @@ EOF
             echo "Commit failed"
         fi
 
-        if show_result_and_get_command "$checked_count" "$already_set_count" "$working_copy_count" "$error_count" "$to_commit_count"; then
+        if show_result_and_get_command "$checked_count" "$already_set_count" "$working_copy_count" "$error_count" "$to_commit_count" "$to_restore_count"; then
             return 0
         fi
 
@@ -688,6 +703,7 @@ show_result_and_get_command()
     working_copy_count=$3
     error_count=$4
     to_commit_count=$5
+    to_restore_count=$6
 
     skip_count=$(expr "${already_set_count}" + "${working_copy_count}" + "${error_count}")
 
@@ -708,11 +724,13 @@ EOF
 Select an operation:
 
     1   -- Commit file:mtime metadata ($to_commit_count)
-    2   -- Rescan
-    3   -- Show files to commit ($to_commit_count)
-    4   -- Show completed files ($already_set_count)
-    5   -- Show working copy files ($working_copy_count)
-    6   -- Show error files ($error_count)
+    2   -- Restore file:mtime metadata ($to_restore_count)
+    3   -- Rescan
+    4   -- Show files to commit ($to_commit_count)
+    5   -- Show files to restore ($to_restore_count)
+    6   -- Show completed files ($already_set_count)
+    7   -- Show working copy files ($working_copy_count)
+    8   -- Show error files ($error_count)
 
   Other -- Exit
 
@@ -728,22 +746,30 @@ EOF
         ;;
 
         2)
-            cmd=scan
+            cmd=restore
         ;;
 
         3)
-            cmd=show_commit
+            cmd=scan
         ;;
 
         4)
-            cmd=show_completed
+            cmd=show_commit
         ;;
 
         5)
-            cmd=show_working_copy
+            cmd=show_restore
         ;;
 
         6)
+            cmd=show_completed
+        ;;
+
+        7)
+            cmd=show_working_copy
+        ;;
+
+        8)
             cmd=show_error
         ;;
 
@@ -1212,9 +1238,7 @@ dispatch()
 
 main()
 {
-    if [ "$(basename "$0")" = "svn_kmt" ]; then
-        [ -L "$(find_command "svn_kmt")" ] && SVN_KMT_DEBUG=1
-    fi
+    [ "$(basename "$0")" = "svn_kmt" ] && [ -L "$(find_command "svn_kmt")" ] && SVN_KMT_DEBUG=1
 
     detect_platform || return 1
 
