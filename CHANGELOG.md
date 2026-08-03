@@ -22,4 +22,13 @@
 
 - Renamed files:
   - `svn_org` -> `svn_kmt_org`
+
+## 0.6.9
+
+### Changed
+
+- Renamed sub commands and files:
+  - `kmt_complete` -> `kmt-complete`
+  - `kmt_restore` -> `kmt-restore`
+  - `svn_kmt.sh` -> `svn_kmt`
   

@@ -99,7 +99,7 @@ find_command()
 kmt_is_installed()
 {
     svn=$(find_command svn) || return 1
-    svn_kmt=$(dirname "$svn")/svn_kmt.sh
+    svn_kmt=$(dirname "$svn")/svn_kmt
     svn_kmt_org=$(dirname "$svn")/svn_kmt_org
 
     if [ -L "$svn" ] && [ "$(readlink "$svn")" = "$svn_kmt" ] && [ -x "$svn_kmt" ] && [ -x "$svn_kmt_org" ]; then
@@ -112,7 +112,7 @@ kmt_is_installed()
 kmt_has_been_uninstalled()
 {
     svn=$(find_command svn) || return 1
-    svn_kmt=$(dirname "$svn")/svn_kmt.sh
+    svn_kmt=$(dirname "$svn")/svn_kmt
     svn_kmt_org=$(dirname "$svn")/svn_kmt_org
 
     if [ -L "$svn" ] && [ "$(readlink "$svn")" = "$svn_kmt" ]; then
@@ -121,7 +121,7 @@ kmt_has_been_uninstalled()
     fi
 
     if [ -f "$svn_kmt" ]; then
-        log "svn_kmt.sh not removed completely"
+        log "svn_kmt not removed completely"
         return 1
     fi
 
@@ -159,7 +159,7 @@ kmt_install()
     [ -z "$SVN" ] && echo "svn not found" && return 1
 
     svn="$(dirname "$SVN")/svn"
-    svn_kmt="$(dirname "$svn")/svn_kmt.sh"
+    svn_kmt="$(dirname "$svn")/svn_kmt"
     svn_kmt_org="$(dirname "$svn")/svn_kmt_org"
 
     ! cp_from=$(full_path_name "$0") && echo "Invalid installation script file" && return 1
@@ -229,7 +229,7 @@ kmt_uninstall()
     svn="$(dirname "$SVN")/svn"
     [ -z "$svn" ] && echo "svn not found" && return 1
 
-    svn_kmt="$(dirname "$svn")/svn_kmt.sh"
+    svn_kmt="$(dirname "$svn")/svn_kmt"
     svn_kmt_org="$(dirname "$svn")/svn_kmt_org"
 
     if ! rm "$svn"; then
@@ -1073,7 +1073,7 @@ $str
 EOF
 
     if [ $has_uncommitted = 1 ]; then
-        echo "Please commit your changes before running kmt_complete."
+        echo "Please commit your changes before running kmt-complete."
         return 1
     fi
 
@@ -1150,7 +1150,7 @@ dispatch()
 
             ;;
 
-        kmt_complete)
+        kmt-complete)
 
             shift
 
@@ -1158,7 +1158,7 @@ dispatch()
 
             ;;
 
-        kmt_restore)
+        kmt-restore)
 
             shift
 
@@ -1212,7 +1212,9 @@ dispatch()
 
 main()
 {
-    [ "$(basename "$0")" = "svn_kmt.sh" ] && SVN_KMT_DEBUG=1
+    if [ "$(basename "$0")" = "svn_kmt" ]; then
+        [ -L "$(find_command "svn_kmt")" ] && SVN_KMT_DEBUG=1
+    fi
 
     detect_platform || return 1
 

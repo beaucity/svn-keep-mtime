@@ -36,10 +36,10 @@ Architecture:
     svn
      |
      v
-    svn_kmt.sh
+    svn_kmt
      |
      v
-    svn_org
+    svn_kmt_org
      |
      v
     Original SVN
@@ -120,13 +120,13 @@ After installation:
 
     svn
      |
-     +-- svn_kmt.sh
+     +-- svn_kmt
 
-    svn_org
+    svn_kmt_org
      |
      +-- original SVN
 
-All normal SVN commands are handled by `svn_kmt.sh`.
+All normal SVN commands are handled by `svn_kmt`.
 
 ------------------------------------------------------------------------
 
@@ -204,7 +204,7 @@ During update or checkout:
     file:mtime property
             |
             v
-    svn_kmt.sh
+         svn_kmt
             |
             v
     Restore filesystem timestamp
@@ -239,7 +239,7 @@ Migration:
 Generate mtime metadata:
 
 ``` bash
-svn kmt_complete
+svn kmt-complete
 ```
 
 This reads current file timestamps and creates:
@@ -253,7 +253,7 @@ properties.
 Restore timestamps on other clients:
 
 ``` bash
-svn kmt_restore
+svn kmt-restore
 ```
 
 The timestamp information is restored from SVN properties.
@@ -279,7 +279,7 @@ Display SVN Keep MTime version.
 ### Complete mtime
 
 ``` bash
-svn kmt_complete
+svn kmt-complete
 ```
 
 Create `file:mtime` properties for existing files.
@@ -294,7 +294,7 @@ Requirements:
 ### Restore mtime
 
 ``` bash
-svn kmt_restore
+svn kmt-restore
 ```
 
 Restore file modification time from SVN properties.
@@ -350,9 +350,9 @@ After installation:
 
 svn
  |
- +-- svn_kmt.sh
+ +-- svn_kmt
 
-svn_org
+svn_kmt_org
  |
  +-- original SVN
 

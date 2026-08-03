@@ -43,7 +43,7 @@ Installation architecture:
     svn
      |
      v
-    svn_kmt.sh
+    svn_kmt
      |
      v
     svn_kmt_org
@@ -77,17 +77,17 @@ Rules:
 
 Migration commands:
 
-    svn kmt_complete
-    svn kmt_restore
+    svn kmt-complete
+    svn kmt-restore
 
 Rules:
 
 -   Migration is optional.
 -   It is not required for normal daily usage.
--   `kmt_complete` only manages mtime metadata.
+-   `kmt-complete` only manages mtime metadata.
 -   It must not encourage users to commit unrelated file changes.
 
-Before running `kmt_complete`:
+Before running `kmt-complete`:
 
 -   Working copy must not contain uncommitted changes.
 
