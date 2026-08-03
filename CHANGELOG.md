@@ -15,3 +15,11 @@
 - Renamed commands:
   - `complete_file_mtime` -> `kmt_complete`
   - `restore_file_mtime` -> `kmt_restore`
+
+## 0.6.8
+
+### Changed
+
+- Renamed files:
+  - `svn_org` -> `svn_kmt_org`
+  

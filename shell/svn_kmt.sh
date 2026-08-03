@@ -13,7 +13,7 @@
 #
 #
 #  Version:
-#      0.6.7
+#      0.6.8
 #
 # ============================================================================
 
@@ -22,7 +22,7 @@
 # Configuration
 ##############################################################################
 
-SVN_KMT_VERSION="0.6.7"
+SVN_KMT_VERSION="0.6.8"
 
 FILE_MTIME_PROP="file:mtime"
 
@@ -39,9 +39,22 @@ log()
 {
     ret=$?
 
-    [ -z "$SVN_KMT_DEBUG" ] || echo "[svn_kmt] $*" >&2
+    [ -z "$SVN_KMT_DEBUG" ] || echo "[-] $*" >&2
 
     return $ret
+}
+
+full_path_name()
+{
+    if [ $# = 0 ]; then
+        return 1
+    fi
+
+    str="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")" || return 1
+
+    echo "$str"
+
+    return 0
 }
 
 ##############################################################################
@@ -72,9 +85,9 @@ detect_platform()
 # Original SVN Detection
 ##############################################################################
 
-find_original_svn()
+find_command()
 {
-    bn="${1:-svn}"
+    bn="${1}"
 
     path=$(command -v "$bn" 2>/dev/null)
 
@@ -83,63 +96,73 @@ find_original_svn()
     fi
 }
 
-detect_original_svn()
+kmt_is_installed()
 {
-    script_name=$(basename "$0")
+    svn=$(find_command svn) || return 1
+    svn_kmt=$(dirname "$svn")/svn_kmt.sh
+    svn_kmt_org=$(dirname "$svn")/svn_kmt_org
 
-    [ "$script_name" = "svn_kmt.sh" ] && SVN_KMT_DEBUG=1
-
-    SVN=$(find_original_svn svn_org)
-
-    if [ -z "$SVN" ]; then
-        SVN=$(find_original_svn svn)
+    if [ -L "$svn" ] && [ "$(readlink "$svn")" = "$svn_kmt" ] && [ -x "$svn_kmt" ] && [ -x "$svn_kmt_org" ]; then
+        return 0
     fi
 
-    if [ -z "$SVN" ]
-    then
+    return 1
+}
+
+kmt_has_been_uninstalled()
+{
+    svn=$(find_command svn) || return 1
+    svn_kmt=$(dirname "$svn")/svn_kmt.sh
+    svn_kmt_org=$(dirname "$svn")/svn_kmt_org
+
+    if [ -L "$svn" ] && [ "$(readlink "$svn")" = "$svn_kmt" ]; then
+        log "Linked with $svn -> $svn_kmt not removed completely"
+        return 1
+    fi
+
+    if [ -f "$svn_kmt" ]; then
+        log "svn_kmt.sh not removed completely"
+        return 1
+    fi
+
+    if [ -f "$svn_kmt_org" ]; then
+        log "svn_kmt_org not removed completely"
+        return 1
+    fi
+
+    return 0
+}
+
+detect_original_svn()
+{
+    if ! SVN=$(find_command svn); then
         echo "Original svn executable not found."
         return 1
     fi
 
-    log "original svn: $SVN"
+    kmt_is_installed && SVN=$(dirname "$SVN")/svn_kmt_org
 
     return 0
 }
 
 kmt_install()
 {
-
-    [ "$(basename "$SVN")" = "svn_org" ] && echo "SVN Keep MTime is already installed." && return 1
-
-    script_name=$(basename "$0")
-    script_dir="$(cd "$(dirname "$0")" && pwd)"
-
-    cp_from="$script_dir/$script_name"
-
-    if [ "$script_name" != "svn_kmt.sh" ]; then
+    if [ "$(basename "$0")" != "svn_kmt.sh" ]; then
         printf "Please run the command as follows:
         ./svn_kmt.sh kmt-install
-        "
+"
         return 1
     fi
+
+    kmt_is_installed && echo "SVN Keep MTime is already installed." && return 1
+
+    [ -z "$SVN" ] && echo "svn not found" && return 1
 
     svn="$(dirname "$SVN")/svn"
-    [ -z "$svn" ] && echo "svn not found" && return 2
-
     svn_kmt="$(dirname "$svn")/svn_kmt.sh"
-    svn_org="$(dirname "$svn")/svn_org"
+    svn_kmt_org="$(dirname "$svn")/svn_kmt_org"
 
-    if [ -e "$svn_org" ]; then
-        echo "Original svn backup already exists."
-        return 1
-    fi
-
-    if [ -L "$svn" ]; then
-        if [ "$(readlink "$svn")" = "$svn_kmt" ]; then
-            echo "SVN Keep MTime is already installed."
-            return 1
-        fi
-    fi
+    ! cp_from=$(full_path_name "$0") && echo "Invalid installation script file" && return 1
 
     if [ ! -f "$svn_kmt" ]; then
         if [ "$1" = "--link" ]; then
@@ -167,18 +190,18 @@ kmt_install()
         fi
     fi
 
-    if ! mv "$svn" "$svn_org"; then
-        echo "Move $svn to $svn_org failed!"
+    if ! mv "$svn" "$svn_kmt_org"; then
+        echo "Move $svn to $svn_kmt_org failed!"
         rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
         return 1
     else
-        echo "Moved $svn to $svn_org successfully."
+        echo "Moved $svn to $svn_kmt_org successfully."
     fi
 
     if ! ln -s "$svn_kmt" "$svn"; then
         echo "Link $svn -> $svn_kmt failed!"
 
-        mv "$svn_org" "$svn" || echo "Rollback: Restore $svn_org to $svn failed."
+        mv "$svn_kmt_org" "$svn" || echo "Rollback: Restore $svn_kmt_org to $svn failed."
 
         rm -f "$svn_kmt" || echo "Rollback: remove $svn_kmt failed."
 
@@ -187,7 +210,7 @@ kmt_install()
         echo "Linked $svn -> $svn_kmt successfully."
     fi
 
-    echo "Installation successful."
+    echo "SVN Keep MTime has been installed successfully."
 
     return 0
 }
@@ -195,30 +218,19 @@ kmt_install()
 kmt_uninstall()
 {
     if [ "$(basename "$0")" != "svn" ]; then
-      # Uninstall must be executed through the active svn wrapper
-      # to avoid removing a different version of svn_kmt.sh.
-        cat << EOF
-Please run the command as follows:
-  svn kmt-uninstall
-EOF
+        printf "Please run the command as follows:
+        svn kmt-uninstall
+"
         return 1
     fi
 
-    [ "$(basename "$SVN")" != "svn_org" ] && echo "SVN Keep MTime is not installed yet." && return 1
+    kmt_has_been_uninstalled && echo "SVN Keep MTime is not installed yet." && return 1
 
     svn="$(dirname "$SVN")/svn"
     [ -z "$svn" ] && echo "svn not found" && return 1
 
     svn_kmt="$(dirname "$svn")/svn_kmt.sh"
-    svn_org="$(dirname "$svn")/svn_org"
-
-    if [ ! -L "$svn" ]; then
-        echo "SVN Keep MTime is not installed yet." && return 1
-    fi
-
-    if [ "$(readlink "$svn")" != "$svn_kmt" ]; then
-        echo "SVN Keep MTime is not installed yet." && return 1
-    fi
+    svn_kmt_org="$(dirname "$svn")/svn_kmt_org"
 
     if ! rm "$svn"; then
         echo "Remove $svn failed!" && return 1
@@ -226,24 +238,31 @@ EOF
         echo "Removed $svn successfully."
     fi
 
-    if ! mv "$svn_org" "$svn"; then
-        echo "Move $svn_org to $svn failed!"
+    if ! mv "$svn_kmt_org" "$svn"; then
+        echo "Move $svn_kmt_org to $svn failed!"
         ln -s "svn_kmt" "$svn" && echo "Rollback: re-linked $svn to $svn_kmt successfully." || echo "Rollback: re-link $svn to $svn_kmt failed!"
         return 1
     else
-        echo "Moved $svn_org to $svn successfully."
+        echo "Moved $svn_kmt_org to $svn successfully."
     fi
 
     rm -f "$svn_kmt" && echo "Removed $svn_kmt successfully" || echo "Warning: remove $svn_kmt failed, ignore it"
 
-    echo "Uninstallation successful."
+    echo "SVN Keep MTime has been uninstalled successfully."
 
     return 0
 }
 
 kmt_upgrade()
 {
-    if [ "$(basename "$SVN")" = "svn_org" ]; then
+    if [ "$(basename "$0")" != "svn_kmt.sh" ]; then
+        printf "Please run the command as follows:
+        ./svn_kmt.sh kmt-upgrade
+"
+        return 1
+    fi
+
+    if kmt_is_installed; then
         echo "SVN Keep MTime is already installed, uninstall it ..."
 
         if ! svn kmt-uninstall; then
@@ -251,17 +270,18 @@ kmt_upgrade()
             return 1
         fi
 
-        SVN=$(find_original_svn svn)
+        detect_original_svn
         if [ -z "$SVN" ]; then
             echo "Original svn executable not found."
             return 1
         fi
 
-        kmt_install "$@" && echo "Upgrade successful." && return 0
+        ! kmt_install "$@" && echo "Upgrade failed." && return 1
 
-        echo "Upgrade failed."
+        echo "SVN Keep MTime has been upgraded successfully."
 
-        return 1
+        return 0
+
     else
         echo "SVN Keep MTime is not installed, installing now."
         kmt_install && return 0 || return 1
@@ -274,9 +294,8 @@ kmt_upgrade()
 
 svn_call()
 {
-    log "svn_org: $SVN $*"
-    # Force English SVN output because status parsing depends on
-    # the status format.
+    log "$SVN $*"
+
     case "$1" in
         update|up|checkout|co|revert|switch)
             LC_MESSAGES=C "$SVN" --config-option config:miscellany:use-commit-times=yes "$@"
@@ -448,17 +467,13 @@ get_files_2_commit()
                 ;;
         esac
 
-        log "line: '$line'"
-
-#        rest=$(echo "$line" | cut -c 3-)
-
         file=$(echo "$line" | sed 's/^\w* *//')
 
-#        log "found: $file"
-        if [ ! -f "$file" ]; then
+        if [ ! -e "$file" ]; then
             file=$(echo "$line" | cut -c 9-)
-            if [ ! -f "$file" ]; then
+            if [ ! -e "$file" ]; then
                 echo "Invalid working file: '$file'"
+                log "Invalid line: '$line'"
                 return 1
             fi
         fi
@@ -822,16 +837,14 @@ save_file_mtime()
             log "Failed to get files list to commit"
             return 1
         fi
-        log "str: '$str'"
+#        log "str: '$str'"
         [ -n "$str" ] && while IFS= read -r file
         do
-            log "line: '$file'"
-
             [ -z "$file" ] && continue
 
             if ! file_ts=$(get_file_mtime "$file"); then
-                echo "$file_ts"
-                echo "'$file'"
+                log "$file_ts"
+                log "'$file'"
                 return 1
             fi
 
@@ -839,6 +852,7 @@ save_file_mtime()
 
             if ! save_a_file_mtime "$file" "$file_ts"; then
                 echo "Set mtime $(format_timestamp "$file_ts") $file failed!"
+                log "line: '$file'"
                 return 1
             fi
         done << EOF
@@ -938,8 +952,6 @@ on_read()
         flag=$(echo "$line" | cut -d ' ' -f 1)
         rest=$(echo "$line" | sed 's/^[^ ]*//')
 
-
-
         case "$flag" in
 #           GU   --??
             A|AA|AU|U|UU|Restored|Reverted|Sending|Adding)
@@ -948,7 +960,7 @@ on_read()
 
                 log "flag: '$flag', rest: '$rest', file: '$file'"
 
-                if [ ! -f "$file" ]; then
+                if [ ! -e "$file" ]; then
                     case "$flag" in
                         Restored|Reverted)
                             file=$(echo "$file" | sed "s/^'//; s/'$//")
@@ -958,14 +970,17 @@ on_read()
                             file=$(echo "$line" | cut -c 16-)
                             ;;
 
+                        A|AA|AU|U|UU):
+                            file=$(echo "$line" | cut -c 6-)
+                            ;;
+
                     esac
 
-                    if [ ! -f "$file" ]; then
-                        echo "File not exists '$file'"
+                    if [ ! -e "$file" ]; then
+                        echo "File not exists: '$file'"
                         log "line: '$line'"
                         return 1
                     fi
-
                 fi
 
                 if ! prop_ts=$(svn_prop_get "$file"); then
@@ -1008,16 +1023,13 @@ command_handler()
 
     if [ "$cmd" = "commit" ]; then
         shift
-        save_file_mtime "$@" || return 1
-        if ! str=$(svn_call "$cmd" "$@"); then
-            echo "$str"
-            return 1
-        fi
+
+        ! str=$(save_file_mtime "$@") && echo "$str" && return 1
+
+        ! str=$(svn_call "$cmd" "$@") && echo "$str" && return 1
+
     else
-        if ! str=$(svn_call "$@"); then
-            echo "$str"
-            return 1
-        fi
+        ! str=$(svn_call "$@") && echo "$str" && return 1
     fi
 
     [ -z "$str" ] && return 0
@@ -1097,7 +1109,7 @@ dispatch()
 {
     if [ $# -eq 0 ]
     then
-        exec "$SVN"
+        svn_call "$@"
         return $?
     fi
 
@@ -1200,6 +1212,8 @@ dispatch()
 
 main()
 {
+    [ "$(basename "$0")" = "svn_kmt.sh" ] && SVN_KMT_DEBUG=1
+
     detect_platform || return 1
 
     detect_original_svn || return 1

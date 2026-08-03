@@ -41,12 +41,12 @@ After installation:
     svn_kmt.sh
      |
      v
-    svn_org
+    svn_kmt_org
      |
      v
     original SVN executable
 
-The original SVN executable is renamed to `svn_org`. SVN Keep MTime
+The original SVN executable is renamed to `svn_kmt_org`. SVN Keep MTime
 forwards normal SVN operations to the original executable while adding
 mtime handling.
 

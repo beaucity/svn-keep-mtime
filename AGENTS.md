@@ -46,7 +46,7 @@ Installation architecture:
     svn_kmt.sh
      |
      v
-    svn_org
+    svn_kmt_org
      |
      v
     original SVN executable
@@ -54,7 +54,7 @@ Installation architecture:
 Rules:
 
 -   Never modify the original SVN executable.
--   Preserve it as `svn_org`.
+-   Preserve it as `svn_kmt_org`.
 -   Keep normal SVN behavior transparent.
 
 ------------------------------------------------------------------------
