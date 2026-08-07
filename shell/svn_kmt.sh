@@ -718,7 +718,7 @@ EOF
             fi
         fi
     elif [ "$cmd" = 'restore' ]; then
-        if [ "$to_commit_count" = 0 ]; then
+        if [ "$effected_count" = 0 ]; then
             echo "No files restored."
         else
             echo "Restored ${effected_count} files successfully."
