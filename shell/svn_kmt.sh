@@ -441,7 +441,7 @@ get_files_2_commit()
     do
         flag=$(echo "$line" | cut -c 1-2)
         case "$flag" in
-            \?*|X*|D*|C*|" C"|"Su"|"  ")
+            "\?*"|X*|D*|C*|" C"|"Su"|"  "w2)
                 continue
                 ;;
             *)
@@ -636,11 +636,11 @@ EOF
                 else
                     if [ "$cmd" = "resolve_conflict" ]; then
                         ! str=$(save_a_file_mtime "$file" "$file_ts") && echo "$str" && return 1
-                        echo "Resolve conflicting mtime $(format_timestamp "$prop_ts") '$file'"
+                        echo "Resolve conflicting mtime $(format_timestamp "$prop_ts") replace with $(format_timestamp "$file_ts") '$file'"
                         effected_count=$(expr "${effected_count}" + 1)
                     else
                         conflict_count=$(expr "${conflict_count}" + 1)
-                        [ "$cmd" = "show_conflict" ] && echo "Conflict mtime local: $(format_timestamp "$file_ts") repos: $(format_timestamp "$prop_ts") $file"
+                        [ "$cmd" = "show_conflict" ] && echo "Conflict mtime repos: $(format_timestamp "$prop_ts") local: $(format_timestamp "$file_ts") $file"
                     fi
                 fi
             else
