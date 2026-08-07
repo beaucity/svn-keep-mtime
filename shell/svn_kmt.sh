@@ -441,7 +441,7 @@ get_files_2_commit()
     do
         flag=$(echo "$line" | cut -c 1-2)
         case "$flag" in
-            "  "|"Su"|\?*|X*|D*)
+            \?*|X*|D*|C*|" C"|"Su"|"  ")
                 continue
                 ;;
             *)
