@@ -31,4 +31,15 @@
   - `kmt_complete` -> `kmt-complete`
   - `kmt_restore` -> `kmt-restore`
   - `svn_kmt.sh` -> `svn_kmt`
-  
+
+## 0.7.0
+
+### Changed
+
+- Added interactive KMT manager command (svn kmt).
+
+## 0.7.1
+
+### Changed
+
+- Add time conflicting check when commit and update

@@ -1,230 +1,271 @@
 # SVN Keep MTime
 
-SVN Keep MTime (`svn_kmt`) is an SVN extension tool that preserves file
-modification time (mtime) between SVN clients.
+SVN Keep MTime (`svn_kmt`) is an SVN client extension that preserves file modification time (`mtime`) information through SVN operations.
 
-## Overview
-
-Subversion normally does not preserve the original file modification
-time when files are checked out or updated. Different clients may
-therefore have different timestamps for the same repository files.
-
-SVN Keep MTime solves this problem by storing file modification time
-information in SVN properties:
-
-    file
-     |
-     +-- file:mtime
-
-The tool is implemented entirely with POSIX shell script and does not
-require Python or additional runtime dependencies.
+The project extends the standard SVN client without changing the repository format or SVN server. It stores file modification timestamps in SVN properties and automatically restores local file timestamps when needed.
 
 ## Features
 
--   Keep file modification time synchronized through SVN
--   Automatically save mtime information during commit
--   Automatically restore mtime during update and checkout
--   Support existing repository timestamp migration
--   Pure shell implementation
--   Compatible with macOS and Linux
--   Keep the original SVN executable unchanged
+* Preserve file modification time after SVN update/checkout.
+* Store original file modification time as SVN property:
 
-## Architecture
+```
+file:mtime
+```
 
-SVN Keep MTime works as an SVN wrapper.
+* Automatically maintain metadata during normal SVN operations.
+* Provide interactive file time management through:
 
-After installation:
+```
+svn kmt
+```
 
-    svn
+* Support migration of existing repositories.
+
+## How It Works
+
+SVN normally records file content and version history, but does not preserve the original filesystem modification time.
+
+SVN Keep MTime adds a metadata layer:
+
+```
+Working Copy
+     |
      |
      v
-    svn_kmt
+file modification time
+     |
      |
      v
-    svn_kmt_org
-     |
-     v
-    original SVN executable
+SVN property
 
-The original SVN executable is renamed to `svn_kmt_org`. SVN Keep MTime
-forwards normal SVN operations to the original executable while adding
-mtime handling.
+file:mtime
+```
+
+During commit:
+
+```
+local mtime
+     |
+     v
+file:mtime property
+     |
+     v
+SVN repository
+```
+
+During update:
+
+```
+SVN repository
+     |
+     v
+file:mtime property
+     |
+     v
+restore local file mtime
+```
 
 ## Installation
 
-Download the script:
+Install using:
 
-``` bash
-chmod +x svn_kmt.sh
 ```
-
-Install:
-
-``` bash
 ./svn_kmt.sh kmt-install
 ```
 
-## Upgrade
+After installation:
 
-Upgrade must be executed from the new script:
-
-``` bash
-./svn_kmt.sh kmt-upgrade
+```
+svn
+ |
+ -> svn_kmt
+ |
+ -> svn_kmt_org
 ```
 
-Do not use:
+The original SVN client is preserved as:
 
-``` bash
-svn kmt-upgrade
+```
+svn_kmt_org
 ```
 
-because upgrade uses the current `svn_kmt.sh` as the installation
-source.
-
-The upgrade process:
-
-1.  Remove the current SVN Keep MTime wrapper installation
-2.  Restore the original SVN executable
-3.  Install the new script
-4.  Recreate the SVN wrapper
-
-## Uninstall
-
-Remove SVN Keep MTime:
-
-``` bash
-svn kmt-uninstall
-```
-
-The original SVN executable will be restored.
-
-The uninstall command must be executed through the installed svn wrapper.
-
-Do not run:
-
-./svn_kmt.sh kmt-uninstall
-
-because it may execute a different svn_kmt.sh version that is not currently active.
-
-
-## Existing Repository Migration
-
-If a repository was created before installing SVN Keep MTime, existing
-clients may already have different file modification times.
-
-Migration is optional. It can be performed later according to user
-requirements.
-
-Use:
-
-``` bash
-svn kmt-complete
-```
-
-to create `file:mtime` properties from the current working copy.
-
-Before running:
-
--   The working copy must not contain uncommitted changes.
--   This command only handles mtime metadata.
--   It does not commit normal file content changes.
-
-After the metadata has been stored:
-
-``` bash
-svn kmt-restore
-```
-
-can restore file modification times from SVN properties.
+The extension works as an SVN client wrapper.
 
 ## Daily Usage
 
-After installation, normal SVN operations do not require additional
-commands.
+After installation, normal SVN commands continue to work:
 
-Examples:
-
-``` bash
-svn update
-svn commit
+```
 svn checkout
+svn update
+svn add
+svn commit
+svn status
 ```
 
-SVN Keep MTime automatically:
+No special workflow is required.
 
--   Saves file mtime during commit
--   Restores file mtime during update and checkout
+SVN Keep MTime automatically handles:
 
-Users do not need to manually run `kmt-restore` during normal
-operation.
+* collecting file modification time metadata
+* submitting metadata during commit
+* restoring timestamps after update
+
+## File Time Management
+
+For existing repositories or troubleshooting, use:
+
+```
+svn kmt
+```
+
+or:
+
+```
+svn kmt-main
+```
+
+The command provides an interactive management interface.
+
+Typical workflow:
+
+```
+svn kmt
+
+1. Scan files
+2. Review missing metadata
+3. Complete file:mtime metadata
+4. Commit metadata
+5. Restore local file time
+```
+
+## Migration Existing Repository
+
+For repositories created before installing SVN Keep MTime:
+
+### 1. Check status
+
+```
+svn kmt
+```
+
+Review files without `file:mtime`.
+
+### 2. Complete metadata
+
+Use the interactive menu to generate missing metadata.
+
+The command checks:
+
+* current working copy status
+* existing `file:mtime`
+* local modification time
+* repository commit time
+
+Only safe files are processed.
+
+### 3. Commit metadata
+
+Commit generated properties:
+
+```
+svn commit
+```
+
+### 4. Restore file timestamps
+
+Restore local filesystem timestamps from SVN metadata:
+
+```
+svn kmt
+```
+
+Select restore operation.
 
 ## Commands
 
-Show version:
+### KMT Management
 
-``` bash
-svn kmt-version
+```
+svn kmt
+svn kmt-main
 ```
 
-Complete existing file mtime:
+Interactive file modification time management.
 
-``` bash
+### Compatibility Commands
+
+```
 svn kmt-complete
-```
-
-Restore file mtime:
-
-``` bash
 svn kmt-restore
 ```
 
-Install:
+These commands remain available as direct shortcuts.
 
-``` bash
-./svn_kmt.sh kmt-install
+Equivalent operations:
+
+```
+svn kmt-complete
 ```
 
-Upgrade:
+equals:
 
-``` bash
+```
+svn kmt
+```
+
+select complete metadata.
+
+```
+svn kmt-restore
+```
+
+equals:
+
+```
+svn kmt
+```
+
+select restore file timestamps.
+
+### Installation
+
+The installation script:
+
+```
+svn_kmt.sh
+```
+
+supports:
+
+```
+./svn_kmt.sh kmt-install
 ./svn_kmt.sh kmt-upgrade
 ```
 
-Uninstall:
+### Remove
 
-``` bash
+Use:
+
+```
 svn kmt-uninstall
 ```
 
-## Requirements
+The uninstall command must be executed through the installed SVN wrapper.
 
--   SVN client
--   POSIX compatible shell
+## Architecture
 
-Tested environments:
+See:
 
--   macOS
--   Linux
+```
+docs/Architecture.md
+```
 
-No Python dependency is required.
+## Version
 
-## Design Principles
+Current version:
 
-### Do not modify original SVN
-
-The original SVN executable is preserved and called through the wrapper
-mechanism.
-
-### Minimal extension
-
-SVN Keep MTime only manages file timestamp metadata and does not replace
-SVN functionality.
-
-### Simple deployment
-
-The project uses shell only to keep deployment simple and
-dependency-free.
-
-## License
-
-See LICENSE file.
+```
+0.7.0
+```

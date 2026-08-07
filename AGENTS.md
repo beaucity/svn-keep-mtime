@@ -1,243 +1,202 @@
 # AGENTS.md
 
+# SVN Keep MTime Development Guide
+
 ## Project Overview
 
-This project is SVN Keep MTime (`svn_kmt`).
+SVN Keep MTime (`svn_kmt`) is an SVN client extension that preserves file modification time metadata.
 
-SVN Keep MTime is an SVN wrapper extension implemented entirely with
-POSIX shell script. It preserves file modification time (`mtime`)
-information between SVN clients by storing timestamps as SVN properties.
+The implementation is shell based and works by wrapping the original SVN client.
 
-The project does not modify SVN itself. It wraps the original SVN
-executable and adds mtime management.
+Main executable:
 
-------------------------------------------------------------------------
+```
+svn_kmt.sh
+```
 
-## Architecture Rules
+Installed executable:
 
-### Shell Only
+```
+svn_kmt
+```
 
-The implementation uses POSIX shell.
+---
 
-Avoid introducing:
+# Architecture Rules
 
--   Python scripts
--   Bash-only syntax
--   Additional runtime dependencies
--   Python dependencies
--   non-portable shell extensions
+The project contains two major parts:
 
-unless compatibility impact has been reviewed.
+## SVN Wrapper
 
-Supported environments:
+Responsible for:
 
--   macOS
--   Linux
+* intercepting SVN commands
+* forwarding commands to original SVN
+* integrating mtime processing
 
-------------------------------------------------------------------------
+## KMT Manager
 
-## SVN Wrapper Model
+Responsible for:
 
-Installation architecture:
+* file time analysis
+* metadata completion
+* timestamp restoration
+* user interaction
 
-    svn
-     |
-     v
-    svn_kmt
-     |
-     v
-    svn_kmt_org
-     |
-     v
-    original SVN executable
+Main command:
+
+```
+svn kmt
+```
+
+---
+
+# Command Naming Rules
+
+Current command style:
+
+```
+kmt-xxxx
+```
+
+Examples:
+
+```
+svn kmt-install
+svn kmt-uninstall
+svn kmt-upgrade
+svn kmt-version
+```
+
+User management command:
+
+```
+svn kmt
+```
+
+or:
+
+```
+svn kmt-main
+```
+
+---
+
+# File Naming Rules
+
+Installation script:
+
+```
+svn_kmt.sh
+```
+
+must keep this name.
+
+It is responsible for:
+
+* installation
+* upgrade
+* initial deployment
+
+Do not rename:
+
+```
+svn_kmt.sh
+```
+
+The script performs internal name checks.
+
+Installed files:
+
+```
+svn_kmt
+svn_kmt_org
+```
+
+---
+
+# Metadata Rules
+
+The project uses SVN property:
+
+```
+file:mtime
+```
 
 Rules:
 
--   Never modify the original SVN executable.
--   Preserve it as `svn_kmt_org`.
--   Keep normal SVN behavior transparent.
+* never overwrite existing valid metadata
+* only create missing metadata when safe
+* restore local timestamps only from trusted metadata
 
-------------------------------------------------------------------------
+---
 
-## File MTime Design
+# Testing Requirements
 
-The timestamp metadata is stored as:
+Before submitting changes:
 
-    file:mtime
+Test on:
 
-Rules:
+* macOS
+* Linux
 
--   Commit operations save mtime information.
--   Update and checkout operations restore mtime.
--   Normal SVN content management remains unchanged.
+Check:
 
-------------------------------------------------------------------------
+* normal SVN commands
+* install
+* uninstall
+* upgrade
+* `svn kmt`
+* metadata completion
+* timestamp restoration
 
-## Existing Repository Migration
+---
 
-Migration commands:
+# Documentation Requirements
 
-    svn kmt-complete
-    svn kmt-restore
+When changing:
 
-Rules:
+* commands
+* installation flow
+* architecture
+* user workflow
 
--   Migration is optional.
--   It is not required for normal daily usage.
--   `kmt-complete` only manages mtime metadata.
--   It must not encourage users to commit unrelated file changes.
+Update:
 
-Before running `kmt-complete`:
+```
+README.md
+docs/Architecture.md
+AGENTS.md
+```
 
--   Working copy must not contain uncommitted changes.
+Command examples must use the current naming convention.
 
-------------------------------------------------------------------------
+---
 
-## Management Commands
+# Development Principles
 
-### Install
+## Keep SVN Compatible
 
-    ./svn_kmt.sh kmt-install
+The extension must behave like normal SVN.
 
-Responsibilities:
+## Avoid Repository Changes
 
--   Detect original SVN.
--   Preserve original executable.
--   Install wrapper.
--   Provide rollback on failure.
+Only SVN properties may be added.
 
-### Upgrade
+## Prefer Safe Operations
 
-    ./svn_kmt.sh kmt-upgrade
+When uncertain:
 
-Upgrade must be executed from the new `svn_kmt.sh`.
+* report status
+* ask user
+* do not modify timestamps automatically
 
-Do not use:
+## Keep User Workflow Simple
 
-    svn kmt-upgrade
+The preferred user entry point is:
 
-because the installed wrapper may be an older version.
+```
+svn kmt
+```
 
-Upgrade workflow:
-
-    kmt-uninstall
-            |
-            v
-    restore original SVN
-            |
-            v
-    kmt-install
-
-### Uninstall
-
-    svn kmt-uninstall
-
-Restore the original SVN executable.
-
-The uninstall operation must be executed through the installed SVN wrapper.
-
-Do not use:
-
-./svn_kmt.sh kmt-uninstall
-
-because the script may not be the active installed version.
-
-------------------------------------------------------------------------
-
-## Code Style
-
-Prefer:
-
--   POSIX shell syntax
--   portable commands
--   explicit return checking
-
-Check important operations:
-
--   cp
--   mv
--   rm
--   chmod
--   ln
-
-Provide clear error messages and rollback when possible.
-
-------------------------------------------------------------------------
-
-## User Output
-
-Messages should be:
-
--   concise;
--   grammatically correct;
--   consistent.
-
-Use terminology:
-
--   SVN Keep MTime
--   svn_kmt
--   original SVN
--   file:mtime
-
-Do not use obsolete names:
-
--   svn_ext
--   SVN Extension
-
-------------------------------------------------------------------------
-
-## Testing Requirements
-
-Test before release:
-
-### Platforms
-
--   macOS
--   Linux
-
-### Shells
-
--   zsh
--   dash/bash compatible shells
-
-### Scenarios
-
--   fresh install
--   failed install rollback
--   upgrade
--   uninstall
--   checkout
--   update
--   commit
--   mtime restoration
--   existing repository migration
-
-------------------------------------------------------------------------
-
-## Documentation
-
-Keep synchronized:
-
-    README.md
-    Architecture.md
-    AGENTS.md
-
-Update documentation when changing:
-
--   commands
--   architecture
--   installation flow
--   user workflow
-
-------------------------------------------------------------------------
-
-## Release Checklist
-
-Before release:
-
--   Verify version number.
--   Verify command names.
--   Review English output messages.
--   Test macOS/Linux compatibility.
--   Confirm rollback behavior.
--   Confirm documentation matches implementation.
+not individual internal commands.
