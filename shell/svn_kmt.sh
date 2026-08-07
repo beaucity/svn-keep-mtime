@@ -626,8 +626,8 @@ EOF
 
                 if [ "$file_ts" -gt "$prop_ts" ]; then
                     if [ "$cmd" = "restore" ]; then
+                        ! restore_a_file_mtime "$file" "$prop_ts" && echo "Restore failed $(format_timestamp "$prop_ts") '$file'" && return 1
                         echo "Restoring mtime $(format_timestamp "$prop_ts") '$file'"
-                        restore_a_file_mtime "$file" "$prop_ts" || return 1
                         effected_count=$(expr "${effected_count}" + 1)
                     else
                         [ "$cmd" = "show_restore" ] && echo "To Restore $(format_timestamp "$file_ts") $file"
@@ -658,8 +658,8 @@ EOF
                     nometa_copy_count=$(expr "${nometa_copy_count}" + 1)
                 else
                     if [ "$cmd" = 'commit' ]; then
+                        ! save_a_file_mtime "$file" "$file_ts" && echo "Commit mtime failed $(format_timestamp "$file_ts") '$file'" &&  return 1
                         echo "Committing mtime $(format_timestamp "$file_ts") '$file'"
-                        save_a_file_mtime "$file" "$file_ts" || return 1
                         effected_count=$(expr "${effected_count}" + 1)
                     else
                         [ "$cmd" = "show_commit" ] && echo "To Commit $(format_timestamp "$file_ts") $file"
