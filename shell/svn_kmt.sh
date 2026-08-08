@@ -350,7 +350,7 @@ get_file_mtime()
         linux)
 
             if ! stat -c %Y "$file"; then
-                echo "file: '$file'"
+                echo "get_file_mtime failed: '$file'"
                 return 1
             fi
             ;;
@@ -359,7 +359,7 @@ get_file_mtime()
         macos)
 
             if ! stat -f %m "$file"; then
-                echo "file: '$file'"
+                echo "get_file_mtime failed: '$file'"
                 return 1
             fi
             ;;
@@ -445,7 +445,7 @@ get_files_2_commit()
                 continue
                 ;;
             *)
-                log "$rest"
+                log "$line"
                 ;;
         esac
 
@@ -544,7 +544,7 @@ kmt_main()
         has_uncommitted=0
         [ -n "$str" ] && while read -r file
         do
-            if [ -f "$file" ]; then
+            if [ -e "$file" ]; then
                 echo "Uncommitted changes detected: $file"
                 has_uncommitted=1
             fi
@@ -600,7 +600,7 @@ EOF
 
     [ -n "$str" ] && while IFS= read -r file
     do
-        log "file: $file"
+
 
         if [ -e "$file" ]; then
 
@@ -668,10 +668,9 @@ EOF
                 fi
             fi
         else
-            if [ ! -d "$file" ]; then
-                echo "Invalid file '$file'"
-                return 1
-            fi
+            log "file not exists: '$file'"
+            echo "Invalid file '$file'"
+            return 1
         fi
 
     done << EOF
@@ -751,8 +750,10 @@ save_a_file_mtime()
         return 2
     fi
 
-    ! str=$(svn_call status "$file") && echo "Get status failed. $file" && return 1
-    [ -n "$str" ] && echo "$str" | grep -e "^C.*$str" && log "Has conflict $file" && return 0
+    if [ -f "$file" ]; then
+        ! str=$(svn_call status "$file") && echo "Get status failed. $file" && return 1
+        [ -n "$str" ] && echo "$str" | grep -e "^C.*$str" && log "Has conflict $file" && return 0
+    fi
 
 #    [ -n "$file" ] && echo "tests false" && return 1 #for tests
 
