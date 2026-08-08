@@ -753,7 +753,7 @@ save_a_file_mtime()
     fi
 
     if [ -f "$file" ]; then
-        ! str=$(svn_call status "$file") && echo "Get status failed. $file" && return 1
+        ! str=$(svn_call status "$file@") && echo "Get status failed. $file" && return 1
         [ -n "$str" ] && echo "$str" | grep -e "^C.*$str" && log "Has conflict $file" && return 0
     fi
 
@@ -777,10 +777,10 @@ save_a_file_mtime()
     fi
 
     if ! svn_prop_set \
-        "$file" \
+        "$file@" \
         "$file_ts" \
         >/dev/null  ; then
-          log "Set mtime $(format_timestamp "$file_ts") $file failed!"
+          echo "Set mtime $(format_timestamp "$file_ts") $file failed!"
           return 1
     fi
 
