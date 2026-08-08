@@ -294,7 +294,7 @@ svn_prop_get()
 {
     svn_call propget \
         "$FILE_MTIME_PROP" \
-        "$1" 2>/dev/null
+        "$1@" 2>/dev/null
 }
 
 
@@ -303,7 +303,7 @@ svn_prop_set()
     svn_call propset \
         "$FILE_MTIME_PROP" \
         "$2" \
-        "$1"
+        "$1@"
 }
 
 
@@ -412,13 +412,13 @@ set_file_mtime()
 get_versioned_timestamp() {
     path="${1:-.}"
 
-    dt=$(svn_call info --xml "$path" 2>/dev/null |
+    dt=$(svn_call info --xml "$path@" 2>/dev/null |
         sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
         head -n1)
 
-    [ -z "$dt" ] && dt=$(svn_call info --xml "$path@" 2>/dev/null |
-        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
-        head -n1)
+#    [ -z "$dt" ] && dt=$(svn_call info --xml "$path@" 2>/dev/null |
+#        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
+#        head -n1)
 
     [ -z "$dt" ] && return 0
 
@@ -669,7 +669,7 @@ EOF
                     echo "Committing mtime $(format_timestamp "$file_ts") '$file'"
                     effected_count=$(expr "${effected_count}" + 1)
                 else
-                    [ "$cmd" = "show_commit" ] && echo "To Commit $(format_timestamp "$file_ts") $file"
+                    [ "$cmd" = "show_commit" ] && echo "To Commit $(format_timestamp "$version_ts") $(format_timestamp "$file_ts") $file"
                     to_commit_count=$(expr "${to_commit_count}" + 1)
                 fi
             fi
@@ -777,7 +777,7 @@ save_a_file_mtime()
     fi
 
     if ! svn_prop_set \
-        "$file@" \
+        "$file" \
         "$file_ts" \
         >/dev/null  ; then
           echo "Set mtime $(format_timestamp "$file_ts") $file failed!"
