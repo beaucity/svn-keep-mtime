@@ -416,6 +416,10 @@ get_versioned_timestamp() {
         sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
         head -n1)
 
+    [ -z "$dt" ] && dt=$(svn_call info --xml "$path@" 2>/dev/null |
+        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
+        head -n1)
+
     [ -z "$dt" ] && return 0
 
     case "$PLATFORM" in
@@ -441,7 +445,7 @@ get_files_2_commit()
     do
         flag=$(echo "$line" | cut -c 1-2)
         case "$flag" in
-            \?*|X*|D*|C*|" C"|"Su"|"  "|"? ")
+            \?*|X*|D*|C*|" C"|"Su"|"  ")
                 continue
                 ;;
             *)
@@ -601,76 +605,74 @@ EOF
     [ -n "$str" ] && while IFS= read -r file
     do
 
+        checked_count=$(expr "${checked_count}" + 1)
 
-        if [ -e "$file" ]; then
-
-            checked_count=$(expr "${checked_count}" + 1)
-
-            if ! file_ts=$(get_file_mtime "$file"); then
-                echo "$file_ts"
-                return 1
-            fi
-
-            [ -z "$file_ts" ] && echo "Get file mtime failed: '$file'" && return 1
-
-            ! prop_ts=$(svn_prop_get "$file") && prop_ts=
-
-            if [ -n "$prop_ts" ]; then
-                [ "$cmd" = "show_working_copy" ] || [ "$cmd" = "commit" ] || [ "$cmd" = "show_commit" ] && continue
-
-                if [ "$file_ts" = "$prop_ts" ]; then
-                    [ "$cmd" = "show_completed" ] && echo "Completed $(format_timestamp "$file_ts") $file"
-                    completed_count=$(expr "${completed_count}" + 1)
-                    continue
-                fi
-
-                if [ "$file_ts" -gt "$prop_ts" ]; then
-                    if [ "$cmd" = "restore" ]; then
-                        ! restore_a_file_mtime "$file" "$prop_ts" && echo "Restore failed $(format_timestamp "$prop_ts") '$file'" && return 1
-                        echo "Restoring mtime $(format_timestamp "$prop_ts") '$file'"
-                        effected_count=$(expr "${effected_count}" + 1)
-                    else
-                        [ "$cmd" = "show_restore" ] && echo "To Restore $(format_timestamp "$file_ts") $file"
-                        to_restore_count=$(expr "${to_restore_count}" + 1)
-                    fi
-                else
-                    if [ "$cmd" = "resolve_conflict" ]; then
-                        ! str=$(save_a_file_mtime "$file" "$file_ts") && echo "$str" && return 1
-                        echo "Resolve conflicting mtime $(format_timestamp "$prop_ts") replace with $(format_timestamp "$file_ts") '$file'"
-                        effected_count=$(expr "${effected_count}" + 1)
-                    else
-                        conflict_count=$(expr "${conflict_count}" + 1)
-                        [ "$cmd" = "show_conflict" ] && echo "Conflict mtime repos: $(format_timestamp "$prop_ts") local: $(format_timestamp "$file_ts") $file"
-                    fi
-                fi
-            else
-                [ "$cmd" = "show_completed" ] || [ "$cmd" = "restore" ] || [ "$cmd" = "show_restore" ] ||
-                 [ "$cmd" = "show_conflict" ] || [ "$cmd" = "resolve_conflict" ] && continue
-
-                version_ts=$(get_versioned_timestamp "$file")
-                if [ -z "$version_ts" ]; then
-                    log "get_versioned_timestamp failed: $file"
-                    continue
-                fi
-
-                if [ "$file_ts" -ge "$version_ts" ]; then
-                    [ "$cmd" = "show_working_copy" ] && echo "Working Copy $(format_timestamp "$file_ts") $file"
-                    nometa_copy_count=$(expr "${nometa_copy_count}" + 1)
-                else
-                    if [ "$cmd" = 'commit' ]; then
-                        ! save_a_file_mtime "$file" "$file_ts" && echo "Commit mtime failed $(format_timestamp "$file_ts") '$file'" &&  return 1
-                        echo "Committing mtime $(format_timestamp "$file_ts") '$file'"
-                        effected_count=$(expr "${effected_count}" + 1)
-                    else
-                        [ "$cmd" = "show_commit" ] && echo "To Commit $(format_timestamp "$file_ts") $file"
-                        to_commit_count=$(expr "${to_commit_count}" + 1)
-                    fi
-                fi
-            fi
-        else
+        if [ ! -e "$file" ]; then
             log "file not exists: '$file'"
             echo "Invalid file '$file'"
             return 1
+        fi
+
+        if ! file_ts=$(get_file_mtime "$file"); then
+            echo "$file_ts"
+            return 1
+        fi
+
+
+        [ -z "$file_ts" ] && echo "Get file mtime failed: '$file'" && return 1
+
+        ! prop_ts=$(svn_prop_get "$file") && prop_ts=
+
+        if [ -n "$prop_ts" ]; then
+            [ "$cmd" = "show_working_copy" ] || [ "$cmd" = "commit" ] || [ "$cmd" = "show_commit" ] && continue
+
+            if [ "$file_ts" = "$prop_ts" ]; then
+                [ "$cmd" = "show_completed" ] && echo "Completed $(format_timestamp "$file_ts") $file"
+                completed_count=$(expr "${completed_count}" + 1)
+                continue
+            fi
+
+            if [ "$file_ts" -gt "$prop_ts" ]; then
+                if [ "$cmd" = "restore" ]; then
+                    ! restore_a_file_mtime "$file" "$prop_ts" && echo "Restore failed $(format_timestamp "$prop_ts") '$file'" && return 1
+                    echo "Restoring mtime $(format_timestamp "$prop_ts") '$file'"
+                    effected_count=$(expr "${effected_count}" + 1)
+                else
+                    [ "$cmd" = "show_restore" ] && echo "To Restore $(format_timestamp "$file_ts") $file"
+                    to_restore_count=$(expr "${to_restore_count}" + 1)
+                fi
+            else
+                if [ "$cmd" = "resolve_conflict" ]; then
+                    ! str=$(save_a_file_mtime "$file" "$file_ts") && echo "$str" && return 1
+                    echo "Resolve conflicting mtime $(format_timestamp "$prop_ts") replace with $(format_timestamp "$file_ts") '$file'"
+                    effected_count=$(expr "${effected_count}" + 1)
+                else
+                    conflict_count=$(expr "${conflict_count}" + 1)
+                    [ "$cmd" = "show_conflict" ] && echo "Conflict mtime repos: $(format_timestamp "$prop_ts") local: $(format_timestamp "$file_ts") $file"
+                fi
+            fi
+        else
+            [ "$cmd" = "show_completed" ] || [ "$cmd" = "restore" ] || [ "$cmd" = "show_restore" ] ||
+             [ "$cmd" = "show_conflict" ] || [ "$cmd" = "resolve_conflict" ] && continue
+
+            version_ts=$(get_versioned_timestamp "$file")
+            if [ -z "$version_ts" ]; then
+                echo "Get versioned timestamp failed: '$file'" && continue
+            fi
+
+            if [ "$file_ts" -ge "$version_ts" ]; then
+                [ "$cmd" = "show_working_copy" ] && echo "Working Copy $(format_timestamp "$file_ts") $file"
+                nometa_copy_count=$(expr "${nometa_copy_count}" + 1)
+            else
+                if [ "$cmd" = 'commit' ]; then
+                    ! save_a_file_mtime "$file" "$file_ts" && echo "Commit mtime failed $(format_timestamp "$file_ts") '$file'" &&  return 1
+                    echo "Committing mtime $(format_timestamp "$file_ts") '$file'"
+                    effected_count=$(expr "${effected_count}" + 1)
+                else
+                    [ "$cmd" = "show_commit" ] && echo "To Commit $(format_timestamp "$file_ts") $file"
+                    to_commit_count=$(expr "${to_commit_count}" + 1)
+                fi
+            fi
         fi
 
     done << EOF
@@ -1023,12 +1025,12 @@ kmt_main_handler()
 
 Select an operation:
 
-    1   -- Scan the file:mtime status
+    1   -- Scan the file:mtime status $checked_count
     2   -- List the completed files $completed_count
     3   -- List the files need to complete metadata $to_commit_count
     4   -- List the files need to restore mtime $to_restore_count
-    5   -- List the working copy files without file:mtime metadata $nometa_copy_count
-    6   -- List the files which the file mtime is conflicting with repos $conflict_count
+    5   -- List the files which the file mtime is conflicting with repos $conflict_count
+    6   -- List the working copy files without file:mtime metadata $nometa_copy_count
 
     7   -- Complete file:mtime metadata ( with local file mtime ) $to_commit_count
     8   -- Restore local file mtime ( with the metadata in repos ) $to_restore_count
@@ -1054,10 +1056,10 @@ EOF
                 cmd=show_restore ;;
 
             5)
-                cmd=show_working_copy ;;
+                cmd=show_conflict ;;
 
             6)
-                cmd=show_conflict ;;
+                cmd=show_working_copy ;;
 
             7)
                 cmd=commit ;;
