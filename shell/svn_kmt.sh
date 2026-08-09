@@ -31,7 +31,7 @@ SVN=""
 
 PLATFORM=""
 
-SCAN_MODE=
+SCAN_BACKEND=
 
 ##############################################################################
 # Utility
@@ -145,34 +145,34 @@ detect_original_svn()
     return 0
 }
 
-auto_set_kmt_scan_mode()
+auto_set_kmt_scan_backend()
 {
-#    SCAN_MODE='posix'
+#    SCAN_BACKEND='posix'
 
-    [ -n "$(find_command python)" ] && SCAN_MODE='python' || SCAN_MODE='join'
+    [ -n "$(find_command python)" ] && SCAN_BACKEND='python' || SCAN_BACKEND='join'
 
     return 0
 }
 
-set_kmt_scan_mode()
+set_kmt_scan_backend()
 {
     p=$1
-    SCAN_MODE="${p#*=}"
-    [ -z "$SCAN_MODE" ] && ! auto_set_kmt_scan_mode && return 1
+    SCAN_BACKEND="${p#*=}"
+    [ -z "$SCAN_BACKEND" ] && ! auto_set_kmt_scan_backend && return 1
 
-    case "$SCAN_MODE" in
+    case "$SCAN_BACKEND" in
         posix|join|python)
             ;;
         auto)
-            auto_set_kmt_scan_mode
+            auto_set_kmt_scan_backend
             ;;
         *)
-            echo "Invalid scan mode $SCAN_MODE"
+            echo "Invalid scanning backend $SCAN_BACKEND"
             return 1
             ;;
     esac
 
-    log "SCAN_MODE: $SCAN_MODE"
+    log "SCAN_BACKEND: $SCAN_BACKEND"
 
     return 0
 
@@ -948,7 +948,9 @@ EOF
 
     esac
 
-    if [ "$SCAN_MODE" = "python" ] || [ "$SCAN_MODE" = "join" ] ; then
+    start=$(date +%s)
+
+    if [ "$SCAN_BACKEND" = "python" ] || [ "$SCAN_BACKEND" = "join" ] ; then
 
         SEP=$'\x03'
 #        SEP='$'
@@ -958,7 +960,7 @@ EOF
         while IFS= read -r dir
         do
             [ -n "$dir" ] && echo "dir: $dir"
-            if [ "$SCAN_MODE" = "python" ]; then
+            if [ "$SCAN_BACKEND" = "python" ]; then
                 if [ -z "$dir" ]; then
                     ! str=$(python_scan '\x03') && echo "$str" && return 1
                 else
@@ -1005,16 +1007,20 @@ EOF
     fi
 
 
+    end=$(date +%s)
+    duration=$((end - start))
 
+    echo "Done."
+    echo "Elapsed time: ${duration}s   Scan backend: $SCAN_BACKEND"
     case "$cmd" in
      "scan")
         cat << EOF
-Done. $checked_count versioned files checked.
-    Completed:    $completed_count
-    To complete:  $to_commit_count
-    To restore:   $to_restore_count
-    Conflict:     $conflict_count
-    No metadata:  $nometa_copy_count
+Versioned files checked:  $checked_count
+    Completed:      $completed_count
+    To complete:    $to_commit_count
+    To restore:     $to_restore_count
+    Conflict:       $conflict_count
+    No metadata:    $nometa_copy_count
 EOF
         ;;
     'complete')
@@ -1052,22 +1058,22 @@ EOF
         fi
         ;;
     'show_completed')
-        echo "Done. $completed_count files."
+        echo "$completed_count completed files."
         ;;
     'show_to_complete')
-        echo "Done. $to_commit_count files."
+        echo "$to_commit_count files need to complete."
         ;;
     'show_to_restore')
-        echo "Done. $to_restore_count files."
+        echo "$to_restore_count files need to restore."
         ;;
     'show_working_copy')
-        echo "Done. $nometa_copy_count files."
+        echo "$nometa_copy_count working copy files."
         ;;
     'show_conflict')
-        echo "Done. $conflict_count files."
+        echo "$conflict_count mtime conflicting files."
         ;;
     *)
-        echo "Done."
+#        echo "Done."
         ;;
 
     esac
@@ -1377,14 +1383,14 @@ kmt_command_handler()
     for p in "$@";
     do
         case "$p" in
-            --scan-mode=*)
+            --scan-backend=*)
                 shift
-                ! set_kmt_scan_mode "${p#*=}" && return 1
+                ! set_kmt_scan_backend "${p#*=}" && return 1
             ;;
         esac
     done
 
-    [ -z "$SCAN_MODE" ] && ! auto_set_kmt_scan_mode && return 1
+    [ -z "$SCAN_BACKEND" ] && ! auto_set_kmt_scan_backend && return 1
 
     show_version
 
@@ -1470,7 +1476,7 @@ show_version()
 {
     echo "SVN Keep MTime"
     echo "version ${SVN_KMT_VERSION}"
-    echo "scan-mode: $SCAN_MODE"
+    echo "Scan backend: $SCAN_BACKEND"
 }
 
 ##############################################################################

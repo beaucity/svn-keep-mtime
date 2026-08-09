@@ -48,4 +48,4 @@
 
 ### Added
 
-- Add 2 scan modes (python & join) to enhance performance
+- Add 2 scanning backends (python & join) to enhance performance

@@ -221,6 +221,15 @@ are wrappers around the KMT Manager.
 
 ---
 
+# Scanning backend
+
+        file scanner
+              |
+       +------+------+
+       |             |
+    python        join
+    scanner      scanner
+
 # Design Principles
 
 ## Non-invasive
