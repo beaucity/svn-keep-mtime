@@ -43,3 +43,9 @@
 ### Changed
 
 - Add time conflicting check when commit and update
+
+## 0.7.2
+
+### Added
+
+- Add 2 scan modes (python & join) to enhance performance
