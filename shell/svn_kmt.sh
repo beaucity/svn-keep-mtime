@@ -581,7 +581,7 @@ join_scan()
 
         done | LC_ALL=C sort > /tmp/props.$$
 
-    svn_kmt_org info -R "$dir" --xml 2>/dev/null | awk -v sep="$SEP" '
+    svn_call info -R "$dir" --xml 2>/dev/null | awk -v sep="$SEP" '
     BEGIN { path = ""; date_str = "" }
     /<entry/ { path = ""; date_str = "" }
     /path=/ {
@@ -706,7 +706,7 @@ def check_output(cmd, stderr=None, text=True):
         return output
 
 try:
-    ls_output = check_output(['svn_kmt_org', 'ls', '-R'$work_dir])
+    ls_output = check_output(['svn', 'ls', '-R'$work_dir])
     all_files = ['$dir_head'+f.rstrip('/') for f in ls_output.splitlines()
 #                 if f.strip() and not f.strip().endswith('/')
                  ]
@@ -716,7 +716,7 @@ except Exception as e:
 
 props = {}
 try:
-    prop_output = check_output(['svn_kmt_org', 'propget', 'file:mtime', '-R'$work_dir])
+    prop_output = check_output(['svn', 'propget', 'file:mtime', '-R'$work_dir])
 
     for line in prop_output.splitlines():
 
@@ -731,7 +731,7 @@ except Exception:
 
 version_ts = {}
 try:
-    info_output = check_output(['svn_kmt_org', 'info', '--xml', '-R'$work_dir])
+    info_output = check_output(['svn', 'info', '--xml', '-R'$work_dir])
     try:
         root = ET.fromstring(info_output)
     except Exception, e:
