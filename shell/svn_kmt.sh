@@ -1032,6 +1032,8 @@ EOF
             if svn_call commit "$@" -m "Completed file mtime for $effected_count files"; then
                 echo "Committed ${effected_count} files successfully."
                 completed_count=$(exp_add "${completed_count}" "${effected_count}")
+
+                ! svn up "$@" && echo "SVN update to date failed"
             else
                 echo "Commit failed."
                 return 1
@@ -1045,6 +1047,8 @@ EOF
             if svn_call commit "$@" -m "Resolved file mtime for $effected_count files"; then
                 echo "Resolved ${effected_count} files successfully."
                 completed_count=$(exp_add "${completed_count}" "${effected_count}")
+
+                ! svn up "$@" && echo "SVN update to date failed"
             else
                 echo "Commit failed."
                 return 1
