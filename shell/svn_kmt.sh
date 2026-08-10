@@ -691,22 +691,24 @@ import datetime
 import xml.etree.ElementTree as ET
 
 def check_output(cmd, stderr=None, text=True):
+    env = os.environ.copy()
+    env['LC_ALL'] = 'C'
     if sys.version_info[0] >= 3:
         # Python 3
         if text:
-            return subprocess.check_output(cmd, stderr=stderr, text=True)
+            return subprocess.check_output(cmd, stderr=stderr, env=env, text=True)
         else:
-            return subprocess.check_output(cmd, stderr=stderr)
+            return subprocess.check_output(cmd, stderr=stderr, env=env)
     else:
         # Python 2
-        output = subprocess.check_output(cmd, stderr=stderr)
+        output = subprocess.check_output(cmd, stderr=stderr, env=env)
 
         if text:
             return output.decode('utf-8')
         return output
 
 try:
-    ls_output = check_output(['svn', 'ls', '-R'$work_dir])
+    ls_output = check_output(['svn_kmt_org', 'ls', '-R'$work_dir])
     all_files = ['$dir_head'+f.rstrip('/') for f in ls_output.splitlines()
 #                 if f.strip() and not f.strip().endswith('/')
                  ]
@@ -716,7 +718,7 @@ except Exception as e:
 
 props = {}
 try:
-    prop_output = check_output(['svn', 'propget', 'file:mtime', '-R'$work_dir])
+    prop_output = check_output(['svn_kmt_org', 'propget', 'file:mtime', '-R'$work_dir])
 
     for line in prop_output.splitlines():
 
@@ -731,15 +733,9 @@ except Exception:
 
 version_ts = {}
 try:
-    info_output = check_output(['svn', 'info', '--xml', '-R'$work_dir])
-    try:
-        root = ET.fromstring(info_output)
-    except Exception, e:
-        print('Exception: %s', e)
-        f = open('/tmp/python_scan.txt', 'wb')
-        f.write(info_output)
-        f.close()
-        exit(1)
+    info_output = check_output(['svn_kmt_org', 'info', '--xml', '-R'$work_dir])
+
+    root = ET.fromstring(info_output)
 
     for entry in root.findall('.//entry'):
         path = entry.get('path')
@@ -773,9 +769,9 @@ try:
                     delta = dt - epoch
                     timestamp = int(delta.total_seconds())
                 version_ts[path] = timestamp
-except Exception:
-    pass
-
+except Exception, e:
+    print('Exception:', e)
+    exit(1)
 
 for f in all_files:
     if os.path.exists(f):
