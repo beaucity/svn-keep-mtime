@@ -732,7 +732,15 @@ except Exception:
 version_ts = {}
 try:
     info_output = check_output(['svn_kmt_org', 'info', '--xml', '-R'$work_dir])
-    root = ET.fromstring(info_output)
+    try:
+        root = ET.fromstring(info_output)
+    except Exception, e:
+        print('Exception: %s', e)
+        f = open('/tmp/python_scan.txt', 'wb')
+        f.write(info_output)
+        f.close()
+        exit(1)
+
     for entry in root.findall('.//entry'):
         path = entry.get('path')
         if path:
