@@ -229,7 +229,23 @@ svn kmt
 
 select restore file timestamps.
 
-### Installation
+
+### Scan Backend
+
+SVN Keep MTime supports multiple scanning backends.
+
+Automatic selection:
+
+- python: preferred when Python is available
+- join: shell fallback
+
+Manual selection:
+
+svn kmt-complete --scan-backend=python
+svn kmt-complete --scan-backend=join
+
+
+## Installation
 
 The installation script:
 
@@ -244,7 +260,7 @@ supports:
 ./svn_kmt.sh kmt-upgrade
 ```
 
-### Remove
+## Remove
 
 Use:
 
@@ -254,20 +270,6 @@ svn kmt-uninstall
 
 The uninstall command must be executed through the installed SVN wrapper.
 
-
-## Scan Modes
-
-SVN Keep MTime supports multiple scanning backends.
-
-Automatic selection:
-
-- python: preferred when Python is available
-- join: shell fallback
-
-Manual selection:
-
-svn kmt-complete --scan-backend=python
-svn kmt-complete --scan-backend=join
 
 
 ## Architecture
