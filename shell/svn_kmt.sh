@@ -13,7 +13,7 @@
 #
 #
 #  Version:
-#      0.7.3
+#      0.7.4
 #
 #
 # ============================================================================
@@ -23,7 +23,7 @@
 # Configuration
 ##############################################################################
 
-SVN_KMT_VERSION="0.7.3"
+SVN_KMT_VERSION="0.7.4"
 
 FILE_MTIME_PROP="file:mtime"
 
@@ -897,7 +897,7 @@ kmt_command()
     do
         ! is_update_to_date "$dir" && echo "The working copy '${dir:-.}' is not update to date." && return 1
 
-        if [ "$cmd" = 'complete' ] || [ "$cmd" = 'restore' ]; then
+        if [ "$cmd" = 'complete' ] || [ "$cmd" = 'restore' ] || [ "$cmd" = 'resolve' ]; then
 
             if ! str=$(get_files_2_commit "$dir"); then
                 echo "$str"
