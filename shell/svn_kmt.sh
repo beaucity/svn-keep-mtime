@@ -13,7 +13,7 @@
 #
 #
 #  Version:
-#      0.7.2
+#      0.7.3
 #
 #
 # ============================================================================
@@ -23,7 +23,7 @@
 # Configuration
 ##############################################################################
 
-SVN_KMT_VERSION="0.7.2"
+SVN_KMT_VERSION="0.7.3"
 
 FILE_MTIME_PROP="file:mtime"
 
@@ -441,18 +441,33 @@ set_file_mtime()
 # Working Copy Functions
 ##############################################################################
 
+get_reversion_info()
+{
+    path="$1"
+    key="$2"
+
+    case "$path" in *@*) path="$path@" ;; esac
+
+    svn_call info --xml "$path" 2>/dev/null |
+        sed -n "s:.*<$key>\(.*\)</$key>.*:\1:p" |
+        head -n1
+}
+
 get_versioned_timestamp() {
     path="${1:-.}"
 
-    dt=$(svn_call info --xml "$path@" 2>/dev/null |
-        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
-        head -n1)
+    ! dt=$(get_reversion_info "$path" 'date') && echo dt && return 1
+#    dt=$(svn_call info --xml "$path@" 2>/dev/null |
+#        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
+#        head -n1)
 
 #    [ -z "$dt" ] && dt=$(svn_call info --xml "$path@" 2>/dev/null |
 #        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
 #        head -n1)
 
     [ -z "$dt" ] && return 0
+
+    log "date: $dt"
 
     case "$PLATFORM" in
         linux)
@@ -464,6 +479,8 @@ get_versioned_timestamp() {
             ;;
     esac
 }
+
+
 
 get_files_2_commit()
 {
@@ -570,16 +587,25 @@ join_scan()
         fi
         done | LC_ALL=C sort > /tmp/files.$$ && echo "svn ls failed" && return 1
 
-    svn_call propget file:mtime -R "$dir" 2>/dev/null | while IFS= read -r line; do
-        if [[ "$line" =~ " - " ]]; then
-#        if [[ "$line" == *" - "* ]]; then
-            file="${line%% - *}"
-            prop="${line#* - }"
-            echo "$file$SEP$prop"
-        fi
+    svn_call propget file:mtime -R "$dir" 2>/dev/null | while IFS= read -r line;
+        do
+            case "$line" in
+                *\ -\ *)
+                  file="${line%% - *}"
+                  prop="${line#* - }"
+                  echo "$file$SEP$prop"
+                ;;
+            esac
+
+#        if [[ "$line" =~ " - " ]]; then
+##        if [[ "$line" == *" - "* ]]; then
+#            file="${line%% - *}"
+#            prop="${line#* - }"
+#            echo "$file$SEP$prop"
+#        fi
         done | LC_ALL=C sort > /tmp/props.$$
 
-    svn info -R "$dir" --xml 2>/dev/null | awk -v sep="$SEP" '
+    svn_kmt_org info -R "$dir" --xml 2>/dev/null | awk -v sep="$SEP" '
     BEGIN { path = ""; date_str = "" }
     /<entry/ { path = ""; date_str = "" }
     /path=/ {
@@ -670,7 +696,7 @@ python_scan()
     SEP=$1
     shift
 
-    if [ "$#" != 0 ]; then
+    if [ "$#" != 0 ] && [ -n "$1" ]; then
         dir_head="$1/"
         work_dir=", '$dir'"
     else
@@ -849,6 +875,8 @@ on_scan()
 
         [ -z "$version_ts" ] && echo "No versioned timestamp provided: '$file'" && return 1
 
+#        log "file_ts: $file_ts, version_ts: $version_ts"
+
         if [ "$file_ts" -ge "$version_ts" ]; then
             [ "$cmd" = "show_working_copy" ] && echo "Working Copy $(format_timestamp "$file_ts") $file"
             nometa_copy_count=$(exp_add "$nometa_copy_count" 1)
@@ -886,32 +914,38 @@ kmt_command()
     conflict_count=0
     nometa_copy_count=0
 
-    if [ "$cmd" = 'complete' ] || [ "$cmd" = 'restore' ]; then
-        for p in "$@"; do
-            [ ! -e "$p" ] && echo "$p is not a valid directory or file" && return 1
-        done
+    dirs=$(select_arg_dirs "$@")
 
-        if ! str=$(get_files_2_commit "$@"); then
-            echo "$str"
-            return 1
-        fi
+    while IFS= read -r dir
+    do
+        ! is_update_to_date "$dir" && echo "The working copy '${dir:-.}' is not update to date." && return 1
 
-        has_uncommitted=0
-        [ -n "$str" ] && while read -r file
-        do
-            if [ -e "$file" ]; then
-                echo "Uncommitted changes detected: $file"
-                has_uncommitted=1
+        if [ "$cmd" = 'complete' ] || [ "$cmd" = 'restore' ]; then
+
+            if ! str=$(get_files_2_commit "$dir"); then
+                echo "$str"
+                return 1
             fi
-        done << EOF
-    $str
+
+            has_uncommitted=0
+            [ -n "$str" ] && while read -r file
+            do
+                if [ -e "$file" ]; then
+                    echo "Uncommitted changes detected: $file"
+                    has_uncommitted=1
+                fi
+            done << EOF
+        $str
 EOF
 
-        if [ $has_uncommitted = 1 ]; then
-            echo "Please commit your changes before running kmt-complete."
-            return 1
+            if [ $has_uncommitted = 1 ]; then
+                echo "Please commit your changes before running kmt-complete."
+                return 1
+            fi
         fi
-    fi
+    done << EOF
+$dirs
+EOF
 
     case $cmd in
         scan)
@@ -951,26 +985,17 @@ EOF
     start=$(date +%s)
 
     if [ "$SCAN_BACKEND" = "python" ] || [ "$SCAN_BACKEND" = "join" ] ; then
-
-        SEP=$'\x03'
 #        SEP='$'
-
-        dirs=$(select_arg_dirs "$@")
+#        SEP=$'\x03'
+        SEP=$(printf '\x03')
 
         while IFS= read -r dir
         do
-            [ -n "$dir" ] && echo "dir: $dir"
             if [ "$SCAN_BACKEND" = "python" ]; then
-                if [ -z "$dir" ]; then
-                    ! str=$(python_scan '\x03') && echo "$str" && return 1
-                else
-                    ! str=$(python_scan '\x03' "$dir") && echo "$str" && return 1
-                fi
+                ! str=$(python_scan "$SEP" "$dir") && echo "$str" && return 1
             else
                 ! str=$(join_scan "$SEP" "$dir") && echo "$str" && return 1
             fi
-
-#            echo "$str"
 
             [ -n "$str" ] && while IFS="$SEP" read -r file file_ts prop_ts version_ts
             do
@@ -1019,7 +1044,7 @@ Versioned files checked:  $checked_count
     Completed:      $completed_count
     To complete:    $to_commit_count
     To restore:     $to_restore_count
-    Conflict:       $conflict_count
+    Conflicts:      $conflict_count
     No metadata:    $nometa_copy_count
 EOF
         ;;
@@ -1394,6 +1419,8 @@ kmt_command_handler()
 
     show_version
 
+    echo "Scanning backend: $SCAN_BACKEND"
+
     if [ -z "$cmd" ] || [ "$cmd" = "ui" ] || [ "$cmd" = "main" ]; then
         kmt_ui "$@"
     else
@@ -1401,13 +1428,27 @@ kmt_command_handler()
     fi
 }
 
+is_update_to_date()
+{
+    path="${1:-.}"
+
+    ! local_rev=$(svn_call info "$path" 2>/dev/null | grep "^Revision:" | awk '{print $2}') && return 1
+    ! remote_rev=$(svn_call info -r HEAD "$path" 2>/dev/null | grep "^Last Changed Rev:" | awk '{print $4}') && return 1
+
+    [ -n "$local_rev" ] && [ -n "$remote_rev" ] && [ "$local_rev" -ge "$remote_rev" ]
+}
+
 kmt_ui()
 {
+    dirs=$(select_arg_dirs "$@")
+
+    dirs_inline=$(echo "$dirs" | tr '\n' ' ' | sed 's/[ \t]*$//')
+
     while true
     do
             cat << EOF
 
-Select an operation:
+Select an operation (dirs: ${dirs_inline:-.}):
 
     1   -- Scan the file:mtime status $checked_count
     2   -- List the completed files $completed_count
@@ -1476,7 +1517,6 @@ show_version()
 {
     echo "SVN Keep MTime"
     echo "version ${SVN_KMT_VERSION}"
-    echo "Scan backend: $SCAN_BACKEND"
 }
 
 ##############################################################################

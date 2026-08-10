@@ -49,3 +49,9 @@
 ### Added
 
 - Add 2 scanning backends (python & join) to enhance performance
+
+## 0.7.3
+
+### Added
+
+- Add update to date checking before run kmt commands

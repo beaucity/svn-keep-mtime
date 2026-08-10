@@ -285,5 +285,5 @@ docs/Architecture.md
 Current version:
 
 ```
-0.7.0
+0.7.3
 ```
