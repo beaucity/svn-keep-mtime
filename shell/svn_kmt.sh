@@ -147,10 +147,7 @@ detect_original_svn()
 
 auto_set_kmt_scan_backend()
 {
-#    SCAN_BACKEND='posix'
-
     [ -n "$(find_command python)" ] && SCAN_BACKEND='python' || SCAN_BACKEND='join'
-
     return 0
 }
 
@@ -441,25 +438,12 @@ set_file_mtime()
 # Working Copy Functions
 ##############################################################################
 
-get_reversion_info()
-{
-    path="$1"
-    key="$2"
-
-    case "$path" in *@*) path="$path@" ;; esac
-
-    svn_call info --xml "$path" 2>/dev/null |
-        sed -n "s:.*<$key>\(.*\)</$key>.*:\1:p" |
-        head -n1
-}
-
 get_versioned_timestamp() {
     path="${1:-.}"
 
-    ! dt=$(get_reversion_info "$path" 'date') && echo dt && return 1
-#    dt=$(svn_call info --xml "$path@" 2>/dev/null |
-#        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
-#        head -n1)
+    dt=$(svn_call info --xml "$path@" 2>/dev/null |
+        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
+        head -n1)
 
 #    [ -z "$dt" ] && dt=$(svn_call info --xml "$path@" 2>/dev/null |
 #        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
@@ -479,8 +463,6 @@ get_versioned_timestamp() {
             ;;
     esac
 }
-
-
 
 get_files_2_commit()
 {
@@ -597,12 +579,6 @@ join_scan()
                 ;;
             esac
 
-#        if [[ "$line" =~ " - " ]]; then
-##        if [[ "$line" == *" - "* ]]; then
-#            file="${line%% - *}"
-#            prop="${line#* - }"
-#            echo "$file$SEP$prop"
-#        fi
         done | LC_ALL=C sort > /tmp/props.$$
 
     svn_kmt_org info -R "$dir" --xml 2>/dev/null | awk -v sep="$SEP" '
@@ -811,11 +787,8 @@ exp_add()
 {
     a=$1
     b=$2
-#    [ -z "$a" ] && a=0
-#    [ -z "$b" ] && b=0
 
     echo $(( a+b ))
-#    echo $(expr "$a" + "$b")
 }
 
 on_scan()
@@ -869,13 +842,9 @@ on_scan()
         fi
     else
         [ "$cmd" = "show_completed" ] || [ "$cmd" = "restore" ] || [ "$cmd" = "show_to_restore" ] ||
-         [ "$cmd" = "show_conflict" ] || [ "$cmd" = "resolve" ] && return 0
-
-#        ! version_ts=$(get_versioned_timestamp "$file") || [ -z "$version_ts" ] && echo "Get versioned timestamp failed: '$file'" && return 0
+            [ "$cmd" = "show_conflict" ] || [ "$cmd" = "resolve" ] && return 0
 
         [ -z "$version_ts" ] && echo "No versioned timestamp provided: '$file'" && return 1
-
-#        log "file_ts: $file_ts, version_ts: $version_ts"
 
         if [ "$file_ts" -ge "$version_ts" ]; then
             [ "$cmd" = "show_working_copy" ] && echo "Working Copy $(format_timestamp "$file_ts") $file"
@@ -1098,7 +1067,6 @@ EOF
         echo "$conflict_count mtime conflicting files."
         ;;
     *)
-#        echo "Done."
         ;;
 
     esac
@@ -1210,8 +1178,7 @@ save_file_mtime()
         [ -z "$file" ] && continue
 
         if ! file_ts=$(get_file_mtime "$file"); then
-            log "$file_ts"
-            log "'$file'"
+            log "file_ts: $file_ts, file: '$file'"
             return 1
         fi
 
@@ -1226,13 +1193,6 @@ save_file_mtime()
     done << EOF
 $str
 EOF
-
-
-#    if [ $has_dir = 0 ]; then
-#        if [ "$#" -gt 1 ]; then     #prevert death loop
-#            save_file_mtime "." || return 1
-#        fi
-#    fi
 
     return 0
 }
@@ -1261,7 +1221,6 @@ restore_a_file_mtime()
 ##############################################################################
 # Command Handler
 ##############################################################################
-
 
 on_read()
 {
