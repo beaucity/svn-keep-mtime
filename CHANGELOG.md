@@ -55,3 +55,9 @@
 ### Added
 
 - Add update to date checking before run kmt commands
+
+## 0.7.5
+
+### Changed
+
+- Enhance scanning performance

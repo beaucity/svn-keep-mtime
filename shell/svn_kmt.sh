@@ -703,7 +703,7 @@ join_scan()
       ret=$?
       if [ "$ret" != 0 ]; then
           #on linux ret:2 means failed, ret:1 means succeed but some rows has not joined
-          if [ "$PLATFORM" = 'macos' ] || [ "$ret" = 2 ]; then
+          if [ "$PLATFORM" != 'linux' ] || [ "$ret" = 2 ]; then
               echo "Warning: join files.$$ and props.$$ to file_props.$$ failed: $ret"
               cat /tmp/file_props.$$
               return 1
@@ -718,7 +718,7 @@ join_scan()
       ret=$?
       if [ "$ret" != 0 ]; then
           #on linux ret:2 means failed, ret:1 means succeed but some rows has not joined
-          if [ "$PLATFORM" = 'macos' ] || [ "$ret" = 2 ]; then
+          if [ "$PLATFORM" != 'linux' ] || [ "$ret" = 2 ]; then
               echo "Warning: join file_props.$$ and version.$$ failed: $ret"
               cat /tmp/version.$$
               return 1
