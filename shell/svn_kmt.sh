@@ -61,6 +61,17 @@ full_path_name()
     return 0
 }
 
+time_diff() {
+    a="$1" b="$2"
+    fa="${a#*.}000000"; fa=$(printf "%s" "$fa" | cut -c 1-6)
+    fb="${b#*.}000000"; fb=$(printf "%s" "$fb" | cut -c 1-6)
+    ia="${a%%.*}" ib="${b%%.*}"
+
+    diff=$(( (ia * 1000000 + fa) - (ib * 1000000 + fb) ))
+    sign=""; [ "$diff" -lt 0 ] && sign="-" && diff=$(( -diff ))
+    printf "%s%d.%06d\n" "$sign" $((diff / 1000000)) $((diff % 1000000))
+}
+
 ##############################################################################
 # Platform
 ##############################################################################
@@ -1060,12 +1071,11 @@ EOF
     end=$(date +%s.%N)
     start=$(echo "$start" | sed 's/0*$//')
     end=$(echo "$end" | sed 's/0*$//')
-#    echo "start:$start, end:$end"
-
-    str=$(find_command "awk") && duration=$(awk "BEGIN {print $end - $start}") || duration=$((end - start))
+    log "diff: $end - $start"
+    duration=$(time_diff "$end" "$start")
 
     echo "Done."
-    echo "Elapsed time: ${duration}s by $SCAN_BACKEND"
+    echo "Elapsed time(s): ${duration} by $SCAN_BACKEND"
     echo ""
     case "$cmd" in
      "scan")
