@@ -25,7 +25,7 @@ The source script provides:
 Current version:
 
 ```text
-0.7.5
+0.7.6
 ```
 
 ---

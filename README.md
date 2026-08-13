@@ -510,5 +510,5 @@ Debug messages are written to standard error.
 Current version:
 
 ```text
-0.7.5
+0.7.6
 ```
