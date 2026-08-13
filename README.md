@@ -10,6 +10,41 @@ file:mtime
 
 The extension works entirely on the SVN client side. It does not require changes to the SVN server or repository format.
 
+
+## Download
+
+The latest release is available on GitHub Releases.
+
+https://github.com/beaucity/svn-keep-mtime/releases
+
+
+## Quick Start
+
+
+```text
+# Download the release archive
+# Extract it
+
+# Install
+cd svn-keep-mtime/shell
+chmod +x svn_kmt.sh
+./svn_kmt.sh kmt-install
+
+# Use SVN normally
+svn checkout <URL>
+svn update
+svn commit
+
+# Installing SVN Keep MTime does not automatically modify existing repository files.
+# Manage existing repositories
+
+svn kmt
+
+
+
+```
+
+
 ## Features
 
 - Automatically records local file `mtime` in `file:mtime` when files are committed.
@@ -202,6 +237,10 @@ After SVN changes a working copy file, SVN Keep MTime reads its `file:mtime` pro
 A special conflict check is performed when the local timestamp is newer than the repository metadata. In that situation, the extension reports the conflict instead of blindly replacing the local timestamp.
 
 ## KMT Management
+
+Installing SVN Keep MTime does not automatically modify existing repository files.
+
+For existing working copies, use `svn kmt` to scan and complete missing `file:mtime` metadata.
 
 The main management entry point is:
 
