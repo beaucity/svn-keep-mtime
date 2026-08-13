@@ -43,7 +43,13 @@ log()
 {
     ret=$?
 
-    [ -z "$SVN_KMT_DEBUG" ] || echo "[-] $*" >&2
+    [ -z "$SVN_KMT_DEBUG" ] && return $ret
+
+    [ -n "$log_ts" ] && tsd=$(time_diff "$(date +%s.%N)" "$log_ts") || tsd=$(format_timestamp "$(date +%s)")
+
+    echo "[ + $tsd] $*" >&2
+
+    log_ts=$(date +%s.%N)
 
     return $ret
 }
@@ -63,13 +69,13 @@ full_path_name()
 
 time_diff() {
     a="$1" b="$2"
-    fa="${a#*.}000000"; fa=$(printf "%s" "$fa" | cut -c 1-6)
-    fb="${b#*.}000000"; fb=$(printf "%s" "$fb" | cut -c 1-6)
+    fa="${a#*.}000000"; fa=$(printf "%s" "$fa" | cut -c 1-6 | sed 's/^0*//')
+    fb="${b#*.}000000"; fb=$(printf "%s" "$fb" | cut -c 1-6 | sed 's/^0*//')
     ia="${a%%.*}" ib="${b%%.*}"
-
+#    log "$ia $fa $ib $fb"
     diff=$(( (ia * 1000000 + fa) - (ib * 1000000 + fb) ))
     sign=""; [ "$diff" -lt 0 ] && sign="-" && diff=$(( -diff ))
-    printf "%s%d.%06d\n" "$sign" $((diff / 1000000)) $((diff % 1000000))
+    printf "%s%d.%06d" "$sign" $((diff / 1000000)) $((diff % 1000000))
 }
 
 ##############################################################################
@@ -494,10 +500,6 @@ get_versioned_timestamp() {
         sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
         head -n1)
 
-#    [ -z "$dt" ] && dt=$(svn_call info --xml "$path@" 2>/dev/null |
-#        sed -n 's:.*<date>\(.*\)</date>.*:\1:p' |
-#        head -n1)
-
     [ -z "$dt" ] && return 1
 
     log "date: $dt"
@@ -609,34 +611,31 @@ EOF
 join_scan()
 {
     SEP=$1
-#    SEP='$'
     shift
 
-    [ "$#" = 0 ] && dir= || dir=$1
+    dir=$1
+
+    [ -n "$dir" ] && dir_prefix="$dir/"
 
     [ "$PLATFORM" = 'linux' ] && cmd="stat -c %n$SEP%Y" || cmd="stat -f "%N$SEP%m""
 
-    ! svn_kmt_org ls -R "$dir" 2>/dev/null | while IFS= read -r file; do
-        [ -n "$dir" ] && file="$dir/$file"
-        file=${file%/}
-        [ -n "$file" ] && printf "%s\0" "$file"
-    done |
-        xargs -0 $cmd 2>/dev/null |
-        LC_ALL=C sort -t "$SEP" -k 1,1 > /tmp/files.$$ && echo "svn ls failed" && return 1
+    log "join scan start"
 
-    ! svn_call propget "$FILE_MTIME_PROP" -R "$dir" 2>/dev/null | while IFS= read -r line;
-        do
-            case "$line" in
-                *\ -\ *)
-                  file="${line%% - *}"
-                  prop="${line#* - }"
-                  echo "$file$SEP$prop"
-                ;;
-            esac
+    ! svn_kmt_org ls -R "$dir" 2>/dev/null |
+        awk -v p="$dir_prefix" '{sub(/\/$/, ""); print p $0}' |
+        tr '\n' '\0' |
+        xargs -0 $cmd 2>/dev/null | LC_ALL=C sort > /tmp/files.$$ && echo "svn ls failed" && return 1
 
-        done | LC_ALL=C sort -t "$SEP" -k 1,1 > /tmp/props.$$ && echo "svn propget failed" && return 1
+    log "svn ls & stat ok. $dir"
+#    cat /tmp/files.$$ >&2
 
-    ! svn_call info -R "$dir" --xml 2>/dev/null | awk -v sep="$SEP" '
+    ! svn_kmt_org propget "$FILE_MTIME_PROP" -R "$dir" | sed "s/\(.*\) - \(.*\)/\1$SEP\2/" \
+        | LC_ALL=C sort > /tmp/props.$$ && echo "svn propget failed" && return 1
+
+    log "svn propget ok. $dir"
+#    cat /tmp/props.$$ >&2
+
+    ! svn_kmt_org info -R "$dir" --xml 2>/dev/null | awk -v sep="$SEP" '
     BEGIN { path = ""; date_str = "" }
     /<entry/ { path = ""; date_str = "" }
     /path=/ {
@@ -704,41 +703,47 @@ join_scan()
             date_str = ""
         }
     }
-' | LC_ALL=C sort -t "$SEP" -k 1,1 > /tmp/version.$$ && echo "svn info failed" && return 1
+' | LC_ALL=C sort > /tmp/version.$$ && echo "svn info failed" && return 1
 
-      join -t "$SEP" -a1 -e '' -o '1.1,1.2,2.2' \
-          /tmp/files.$$ \
-          /tmp/props.$$ \
-          2>/dev/null > /tmp/file_props.$$
+    log "svn status ok $dir"
 
-      ret=$?
-      if [ "$ret" != 0 ]; then
-          #on linux ret:2 means failed, ret:1 means succeed but some rows has not joined
-          if [ "$PLATFORM" != 'linux' ] || [ "$ret" = 2 ]; then
-              echo "Warning: join files.$$ and props.$$ to file_props.$$ failed: $ret"
-              cat /tmp/file_props.$$
-              return 1
-          fi
-      fi
+    LC_ALL=C join -t "$SEP" -a1 -e '' -o '1.1,1.2,2.2' \
+        /tmp/files.$$ \
+        /tmp/props.$$ \
+        2>/dev/null > /tmp/file_props.$$
 
-      join -t "$SEP" -a1 -e '' -o '1.1,1.2,1.3,2.2' \
-          /tmp/file_props.$$ \
-          /tmp/version.$$ \
-          2>/dev/null
+    ret=$?
+    if [ "$ret" != 0 ]; then
+        #on linux ret:2 means failed, ret:1 means succeed but some rows has not joined
+        if [ "$PLATFORM" != 'linux' ] || [ "$ret" = 2 ]; then
+            echo "Warning: join files.$$ and props.$$ to file_props.$$ failed: $ret"
+            cat /tmp/file_props.$$
+            return 1
+        fi
+    fi
 
-      ret=$?
-      if [ "$ret" != 0 ]; then
-          #on linux ret:2 means failed, ret:1 means succeed but some rows has not joined
-          if [ "$PLATFORM" != 'linux' ] || [ "$ret" = 2 ]; then
-              echo "Warning: join file_props.$$ and version.$$ failed: $ret"
-              cat /tmp/version.$$
-              return 1
-          fi
-      fi
+    log "join ok. file_props.$$ $dir"
 
-      rm -f /tmp/files.$$ /tmp/props.$$ /tmp/version.$$ /tmp/file_props.$$
+    LC_ALL=C join -t "$SEP" -a1 -e '' -o '1.1,1.2,1.3,2.2' \
+        /tmp/file_props.$$ \
+        /tmp/version.$$ \
+        2>/dev/null
 
-      return 0
+    ret=$?
+    if [ "$ret" != 0 ]; then
+        #on linux ret:2 means failed, ret:1 means succeed but some rows has not joined
+        if [ "$PLATFORM" != 'linux' ] || [ "$ret" = 2 ]; then
+            echo "Warning: join file_props.$$ and version.$$ failed: $ret"
+            cat /tmp/version.$$
+            return 1
+        fi
+    fi
+
+    log "join ok. version.$$ $dir"
+
+    rm -f /tmp/files.$$ /tmp/props.$$ /tmp/version.$$ /tmp/file_props.$$
+
+    return 0
 }
 
 python_scan()
@@ -882,7 +887,7 @@ on_scan()
     [ -z "$file_ts" ] && echo "No file mtime provided: '$file'" && return 1
 
     if [ -n "$prop_ts" ]; then
-        [ "$cmd" = "show_working_copy" ] || [ "$cmd" = 'complete' ] || [ "$cmd" = "show_to_complete" ] && return 0
+#        [ "$cmd" = "show_working_copy" ] || [ "$cmd" = 'complete' ] || [ "$cmd" = "show_to_complete" ] && return 0
 
         if [ "$file_ts" = "$prop_ts" ] || [ -d "$file" ]; then
             [ "$cmd" = "show_completed" ] && echo "Completed $(format_timestamp "$file_ts") $file"
@@ -910,8 +915,8 @@ on_scan()
             fi
         fi
     else
-        [ "$cmd" = "show_completed" ] || [ "$cmd" = "restore" ] || [ "$cmd" = "show_to_restore" ] ||
-            [ "$cmd" = "show_conflict" ] || [ "$cmd" = "resolve" ] && return 0
+#        [ "$cmd" = "show_completed" ] || [ "$cmd" = "restore" ] || [ "$cmd" = "show_to_restore" ] ||
+#            [ "$cmd" = "show_conflict" ] || [ "$cmd" = "resolve" ] && return 0
 
         [ -z "$version_ts" ] && echo "No versioned timestamp provided: '$file'" && return 1
 
@@ -1025,6 +1030,7 @@ EOF
     if [ "$SCAN_BACKEND" = 'python' ] || [ "$SCAN_BACKEND" = 'join' ] ; then
 
         SEP=$(printf '\x03')
+#        SEP='$'
 
         while IFS= read -r dir
         do
@@ -1035,12 +1041,18 @@ EOF
                 ! str=$(join_scan "$SEP" "$dir") && echo "$str" && echo "join scan failed" && return 1
             fi
 
+#            echo "$str"
+
+            log "on scanned: $dir"
+
             [ -n "$str" ] && while IFS="$SEP" read -r file file_ts prop_ts version_ts
             do
                 ! on_scan "$file" "$file_ts" "$prop_ts" "$version_ts" && return 1
             done << EOF
 $str
 EOF
+            log "scanned result proceed: $dir"
+
         done << EOF
 $dirs
 EOF
@@ -1071,7 +1083,7 @@ EOF
     end=$(date +%s.%N)
     start=$(echo "$start" | sed 's/0*$//')
     end=$(echo "$end" | sed 's/0*$//')
-    log "diff: $end - $start"
+#    log "diff: $end - $start"
     duration=$(time_diff "$end" "$start")
 
     echo "Done."
@@ -1171,20 +1183,14 @@ save_a_file_mtime()
 
     if [ -f "$file" ]; then
         ! str=$(svn_call status "$file@") && echo "Get status failed. $file" && return 1
-        [ -n "$str" ] && echo "$str" | grep -e "^C.*$file" && log "Has conflict $file" && return 0
+        [ -n "$str" ] && echo "$str" | grep -e "^C.*$file" && log "Has conflict $str" && return 0
     fi
 
 #    [ -n "$file" ] && echo "tests false" && return 1 #for tests
 
     prop_ts=$(svn_prop_get "$file")
 
-    if [ -n "$prop_ts" ]; then
-        if [ "$prop_ts" = "$file_ts" ]
-        then
-            log "same mtime: $file"
-            return 0
-        fi
-    fi
+    [ -n "$prop_ts" ] && [ "$prop_ts" = "$file_ts" ] && log "same mtime: $file" && return 0
 
     if [ -n "$str" ] && echo "$str" | grep -e "^M.*$file"; then
         if [ -n "$prop_ts" ] && [ "$file_ts" -lt "$prop_ts" ]; then
@@ -1506,14 +1512,14 @@ Select an operation:
     1   -- Scan the directories (${dirs_inline:-.}) $checked_count
 
     2   -- List the completed files $completed_count
-    3   -- List the files need to complete metadata $to_commit_count
-    4   -- List the files need to restore mtime $to_restore_count
-    5   -- List the files which the file mtime is conflicting with repos $conflict_count
-    6   -- List the working copy files without file:mtime metadata $nometa_copy_count
+    3   -- List the files needing metadata completion $to_commit_count
+    4   -- List the files needing mtime restoration $to_restore_count
+    5   -- List files with mtime conflicts $conflict_count
+    6   -- List working copy files without file:mtime metadata $nometa_copy_count
 
     7   -- Complete file:mtime metadata ( with local file mtime ) $to_commit_count
     8   -- Restore local file mtime ( with the metadata in repos ) $to_restore_count
-    9   -- Resolve mtime conflicting files ( try use local file mtime ) $conflict_count
+    9   -- Resolve mtime conflicts ( try use local file mtime ) $conflict_count
 
   Other -- Exit
 

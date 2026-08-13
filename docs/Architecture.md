@@ -1,260 +1,881 @@
 # SVN Keep MTime Architecture
 
-## Overview
+## 1. Overview
 
-SVN Keep MTime is implemented as an SVN client wrapper.
+SVN Keep MTime is a client-side SVN wrapper.
 
-The architecture has two main layers:
+Its purpose is to preserve filesystem modification time (`mtime`) through SVN operations by storing the timestamp as an SVN property:
 
-```
-              User
-                |
-                v
-          svn command
-                |
-                v
-        +----------------+
-        |   svn_kmt      |
-        +----------------+
-          |            |
-          |            |
-          v            v
-
-   Original SVN     KMT Manager
-   svn_kmt_org      file:mtime engine
+```text
+file:mtime
 ```
 
-The wrapper keeps normal SVN behavior while adding file modification time management.
+The SVN server and repository format are not modified. SVN Keep MTime operates between the user and the original SVN client.
+
+```text
+                         User
+                           |
+                           v
+                          svn
+                           |
+                           v
+                       svn_kmt
+                     /         \
+                    /           \
+             KMT processing   svn_kmt_org
+                                  |
+                                  v
+                           SVN repository
+```
+
+The normal SVN client remains responsible for all actual SVN operations.
 
 ---
 
-# Components
+## 2. Installed Components
 
-## svn_kmt
+### 2.1 `svn`
 
-Main wrapper executable.
+After installation, `svn` is a symbolic link:
 
-Responsibilities:
-
-* intercept SVN commands
-* detect SVN operation
-* call original SVN client when required
-* perform file mtime processing
-
-Installed location:
-
+```text
+svn -> svn_kmt
 ```
+
+The user continues to invoke SVN normally:
+
+```sh
+svn update
+svn commit
+svn checkout
+```
+
+### 2.2 `svn_kmt`
+
+`svn_kmt` is the installed SVN wrapper.
+
+It:
+
+- detects KMT-specific commands;
+- intercepts selected SVN operations;
+- maintains `file:mtime`;
+- restores local timestamps;
+- forwards normal SVN work to the original SVN executable.
+
+### 2.3 `svn_kmt_org`
+
+`svn_kmt_org` is the original SVN executable saved by the installer.
+
+The wrapper invokes it for the underlying SVN operation.
+
+The resulting installation is:
+
+```text
+<SVN bin directory>/
+    svn -> svn_kmt
+    svn_kmt
+    svn_kmt_org
+```
+
+---
+
+## 3. Source and Installation Model
+
+The distribution source is:
+
+```text
+shell/svn_kmt.sh
+```
+
+The file name is part of the installation contract.
+
+Installation is performed by:
+
+```sh
+./svn_kmt.sh kmt-install
+```
+
+The installer normally copies the source file to the installed `svn_kmt`.
+
+Development/test link mode is available:
+
+```sh
+./svn_kmt.sh kmt-install --link
+```
+
+In link mode, `svn_kmt` links back to the source script.
+
+The installer then:
+
+1. Finds the current SVN executable.
+2. Installs `svn_kmt`.
+3. Moves the original `svn` to `svn_kmt_org`.
+4. Creates `svn -> svn_kmt`.
+
+Rollback logic is used for several installation failures so that a partially installed wrapper does not intentionally replace the original SVN client.
+
+---
+
+## 4. Installation and Upgrade
+
+### 4.1 Install
+
+```text
+svn_kmt.sh
+    |
+    v
+kmt-install
+    |
+    +--> install svn_kmt
+    |
+    +--> move svn -> svn_kmt_org
+    |
+    +--> create svn -> svn_kmt
+```
+
+### 4.2 Upgrade
+
+Upgrade is intentionally started from the distribution script:
+
+```sh
+./svn_kmt.sh kmt-upgrade
+```
+
+If an installation already exists:
+
+```text
+svn_kmt.sh
+    |
+    v
+kmt-upgrade
+    |
+    v
+svn kmt-uninstall
+    |
+    +--> restore original svn
+    |
+    +--> remove old svn_kmt
+    |
+    v
+kmt-install
+    |
+    +--> install new svn_kmt
+    |
+    +--> create svn -> svn_kmt
+```
+
+If no installation exists, upgrade falls back to installation.
+
+The source filename check prevents the install/upgrade operations from being started through the installed wrapper.
+
+---
+
+## 5. Uninstall
+
+The supported uninstall entry point is:
+
+```sh
+svn kmt-uninstall
+```
+
+The installed wrapper verifies the installation state and then:
+
+```text
+svn -> svn_kmt
+       |
+       v
+remove svn link
+       |
+       v
+svn_kmt_org -> svn
+       |
+       v
+remove svn_kmt
+```
+
+The original SVN executable is restored before the wrapper is removed.
+
+---
+
+## 6. SVN Command Dispatch
+
+The dispatcher separates normal SVN operations from KMT operations.
+
+### Intercepted SVN operations
+
+The current implementation adds mtime processing to:
+
+```text
+commit / ci
+update / up
+checkout / co
+revert
+```
+
+### KMT operations
+
+```text
+kmt
+kmt-ui
+kmt-main
+
+kmt-complete
+kmt-restore
+kmt-resolve
+
+kmt-version
+kmt-install
+kmt-uninstall
+kmt-upgrade
+```
+
+Other commands are forwarded to the original SVN client.
+
+---
+
+## 7. Commit Processing
+
+The commit path is:
+
+```text
+svn commit
+     |
+     v
 svn_kmt
+     |
+     v
+collect files reported by svn status
+     |
+     v
+read local filesystem mtime
+     |
+     v
+validate mtime
+     |
+     +---- invalid/conflicting ----> stop
+     |
+     v
+set file:mtime property
+     |
+     v
+svn_kmt_org commit
+     |
+     v
+repository
 ```
 
-The user normally calls:
+For added or modified files, the wrapper attempts to save the local filesystem timestamp before calling the original SVN commit.
 
-```
-svn
+### 7.1 Safety checks
+
+`save_a_file_mtime()` performs several important checks.
+
+#### Future timestamp
+
+A timestamp later than the current system time is rejected:
+
+```text
+local mtime > now
 ```
 
-which is linked to:
+The file is not given future `file:mtime` metadata.
 
+#### Existing identical metadata
+
+If:
+
+```text
+local mtime == file:mtime
 ```
-svn_kmt
+
+no property change is required.
+
+#### Modified-file conflict with existing metadata
+
+If a modified file has an existing property and:
+
+```text
+local mtime < file:mtime
 ```
+
+the operation is rejected.
+
+#### Modified-file conflict with version timestamp
+
+If the file is locally modified and:
+
+```text
+local mtime < last versioned commit timestamp
+```
+
+the operation is rejected.
+
+These checks prevent a local timestamp from moving repository metadata backwards unexpectedly.
 
 ---
 
-## svn_kmt_org
+## 8. Update / Checkout / Revert Processing
 
-Original SVN executable.
+The wrapper processes selected SVN output after the original SVN command has run.
 
-The original SVN binary is preserved after installation:
+For a file with valid `file:mtime` metadata:
 
+```text
+svn update / checkout / revert
+             |
+             v
+       svn_kmt_org
+             |
+             v
+        changed file
+             |
+             v
+      read file:mtime
+             |
+             v
+       set filesystem mtime
 ```
-svn_kmt_org
-```
 
-The wrapper uses it for actual SVN operations.
+The timestamp is applied using platform-specific filesystem commands.
+
+### 8.1 Local conflict detection
+
+During an update, if the repository metadata timestamp is newer than the local filesystem timestamp in the relevant update state, the wrapper reports a conflicting mtime instead of silently replacing the local timestamp.
+
+This protects a potentially meaningful local timestamp from being overwritten blindly.
 
 ---
 
-# KMT Manager
+## 9. File mtime Metadata
 
-The KMT Manager provides interactive management:
+The metadata property is:
 
-Command:
-
+```text
+file:mtime
 ```
+
+The property value is a Unix timestamp represented as decimal digits.
+
+Conceptually:
+
+```text
+path/to/file
+    |
+    +-- file:mtime = <unix timestamp>
+```
+
+The repository property is the persistent representation of the filesystem timestamp.
+
+The extension does not put the timestamp into the file contents.
+
+---
+
+## 10. KMT Manager
+
+The KMT manager is implemented by the `kmt_command()` and `kmt_ui()` functions.
+
+The preferred entry point is:
+
+```sh
 svn kmt
+```
+
+Aliases:
+
+```sh
+svn kmt-ui
+svn kmt-main
+```
+
+The interactive menu contains:
+
+```text
+1  Scan the directories
+2  List the completed files
+3  List the files need to complete metadata
+4  List the files need to restore mtime
+5  List files with mtime conflicts
+6  List working-copy files without file:mtime metadata
+7  Complete file:mtime metadata
+8  Restore local file mtime
+9  Resolve mtime conflicts
+```
+
+The manager can repeatedly perform operations until the user exits.
+
+---
+
+## 11. KMT Operation Model
+
+The internal KMT operations are:
+
+```text
+scan
+show_completed
+show_to_complete
+show_to_restore
+show_conflict
+show_working_copy
+complete
+restore
+resolve
+```
+
+The direct command mapping is:
+
+```text
+svn kmt-complete   -> complete
+svn kmt-restore    -> restore
+svn kmt-resolve    -> resolve
+```
+
+The `svn kmt` command exposes the same operations through the interactive menu.
+
+---
+
+## 12. Working Copy Safety
+
+Before KMT modifying operations:
+
+```text
+complete
+restore
+resolve
+```
+
+the wrapper verifies that the selected working copy is up to date.
+
+The check compares:
+
+```text
+local working-copy revision
+repository HEAD revision
+```
+
+It also requires the SVN schedule to be `normal`.
+
+For modifying KMT operations, the working copy must not contain uncommitted added/modified/conflicted files.
+
+The purpose is to keep metadata processing separate from ordinary user changes.
+
+---
+
+## 13. Scan and Classification
+
+The scanner gathers four values for each versioned path:
+
+```text
+path
+local filesystem mtime
+file:mtime property
+versioned commit timestamp
+```
+
+Conceptually:
+
+```text
+                   +----------------------+
+                   | versioned path       |
+                   +----------+-----------+
+                              |
+             +----------------+----------------+
+             |                |                |
+             v                v                v
+        local mtime       file:mtime       version time
+             |                |                |
+             +----------------+----------------+
+                              |
+                              v
+                       classification
+```
+
+### 13.1 Existing metadata
+
+When `file:mtime` exists:
+
+- equal local/property timestamps are considered completed;
+- a local timestamp newer than the property is a candidate for restoration;
+- a local timestamp older than the property is a conflict;
+- directories with metadata are treated as completed.
+
+### 13.2 Missing metadata
+
+When `file:mtime` is absent, the scanner compares:
+
+```text
+local filesystem mtime
+```
+
+with:
+
+```text
+last versioned commit timestamp
+```
+
+If the local timestamp is suitable according to the KMT rules, the file is a candidate for metadata completion.
+
+Otherwise it is reported as a working-copy file without metadata rather than blindly assigned a timestamp.
+
+---
+
+## 14. Completing Missing Metadata
+
+The `complete` operation uses the local filesystem timestamp:
+
+```text
+local mtime
+      |
+      v
+file:mtime property
+      |
+      v
+SVN commit
+```
+
+The operation is not a general-purpose "copy every local timestamp into SVN" operation.
+
+It first checks:
+
+- working-copy revision state;
+- uncommitted changes;
+- future timestamps;
+- existing metadata;
+- versioned commit timestamp;
+- mtime ordering conflicts.
+
+After properties are successfully set, KMT commits them with an automatically generated commit message.
+
+The KMT command then performs an SVN update to synchronize the working copy.
+
+---
+
+## 15. Restore
+
+The `restore` operation takes the timestamp from the repository:
+
+```text
+file:mtime
+     |
+     v
+filesystem mtime
+```
+
+Only files that need restoration are changed.
+
+No SVN commit is required because restoration changes the local filesystem timestamp rather than repository metadata.
+
+---
+
+## 16. Resolve
+
+The `resolve` operation is for mtime conflicts.
+
+Conceptually:
+
+```text
+repository file:mtime
+           |
+           | conflict
+           v
+local filesystem mtime
+           |
+           v
+      safety checks
+           |
+           v
+replace repository metadata
+           |
+           v
+        SVN commit
+```
+
+The local timestamp is used as the candidate replacement value.
+
+The same future-time and ordering protections used by metadata saving remain active.
+
+After a successful metadata commit, the command updates the working copy.
+
+---
+
+## 17. Scanning Backends
+
+Three scanner implementations are available:
+
+```text
+python
+join
+posix
+```
+
+### 17.1 Automatic selection
+
+If no backend is specified:
+
+```text
+Python available?
+    |
+   yes ---> python
+    |
+   no
+    |
+join + awk available?
+    |
+   yes ---> join
+    |
+   no
+    |
+   posix
+```
+
+### 17.2 Python backend
+
+The Python backend collects:
+
+- recursive SVN paths;
+- `file:mtime` properties;
+- recursive SVN XML information;
+- local filesystem mtimes.
+
+It supports Python 2 and Python 3 syntax in the embedded scanner implementation.
+
+### 17.3 Join backend
+
+The join backend uses standard command-line tools to build sorted intermediate datasets and joins:
+
+```text
+filesystem paths + local mtime
+        +
+file:mtime properties
+        +
+SVN version timestamps
+```
+
+The backend uses tools such as:
+
+```text
+svn
+stat
+awk
+sort
+join
+xargs
+```
+
+### 17.4 POSIX backend
+
+The POSIX backend uses the simpler per-file processing path:
+
+```text
+svn ls -R
+    |
+    v
+get local mtime
+    |
+    v
+get file:mtime
+    |
+    v
+get versioned timestamp
+    |
+    v
+classify file
+```
+
+It is the fallback scanner when the optimized backends are unavailable.
+
+### 17.5 Explicit selection
+
+The backend can be selected with:
+
+```sh
+--scan-backend=python
+--scan-backend=join
+--scan-backend=posix
+--scan-backend=auto
+```
+
+For example:
+
+```sh
+svn kmt --scan-backend=join
 ```
 
 or:
 
+```sh
+svn kmt-complete --scan-backend=posix
 ```
-svn kmt-main
-```
-
-Functions include:
-
-* scanning working copy status
-* finding missing `file:mtime`
-* completing metadata
-* restoring filesystem timestamps
-* showing affected files
-
-The manager provides a safer workflow for repository migration and maintenance.
 
 ---
 
-# File Time Metadata
+## 18. Platform Handling
 
-SVN Keep MTime stores timestamps as SVN properties:
+The current implementation supports:
 
+```text
+Linux
+macOS
 ```
-file:mtime
+
+Platform-specific operations include reading filesystem mtime:
+
+```text
+Linux:  stat -c %Y
+macOS:  stat -f %m
 ```
+
+and setting filesystem mtime:
+
+```text
+Linux:  touch -m -d "@<timestamp>"
+macOS:  touch -m -t ...
+```
+
+The wrapper detects the platform at startup and rejects unsupported platforms.
+
+---
+
+## 19. Time Handling
+
+The property stores Unix timestamps.
+
+The wrapper also detects the local timezone offset and uses it when displaying timestamps.
+
+Repository commit timestamps are obtained from SVN information and converted to Unix timestamps before comparison.
+
+The comparisons themselves are numeric timestamp comparisons.
+
+---
+
+## 20. Debugging
+
+The wrapper has an internal debug logger.
+
+Debug mode can be enabled by placing:
+
+```text
+--kmt-debug
+```
+
+before the actual command arguments.
 
 Example:
 
-```
-path/to/file.txt
-
-property:
-file:mtime = 20260805120000
+```sh
+svn --kmt-debug update
 ```
 
-The property represents the original filesystem modification time.
+Debug information is written to standard error.
+
+The logger records command flow and timing information useful for diagnosing scanner and wrapper behavior.
 
 ---
 
-# Commit Flow
+## 21. Design Principles
 
-Normal commit:
+### 21.1 Client-side only
 
-```
-svn commit
-        |
-        v
-svn_kmt
-        |
-        +--> collect file mtime
-        |
-        +--> set file:mtime property
-        |
-        v
-svn_kmt_org
-        |
-        v
-SVN repository
-```
+No SVN server extension is required.
 
----
+### 21.2 Metadata only
 
-# Update Flow
+The file contents are not modified by KMT.
 
-Normal update:
+The persistent mtime information is stored in:
 
-```
-svn update
-        |
-        v
-svn_kmt
-        |
-        v
-svn_kmt_org
-        |
-        v
-working copy updated
-        |
-        v
-restore file mtime
-```
-
----
-
-# Migration Flow
-
-For repositories without metadata:
-
-```
-Existing repository
-
-       |
-       v
-
-svn kmt
-
-       |
-       +--> scan files
-       |
-       +--> generate missing file:mtime
-       |
-       +--> commit properties
-       |
-       +--> restore timestamps
-```
-
----
-
-# Command Model
-
-Main command:
-
-```
-svn kmt
-```
-
-Sub operations:
-
-```
-scan
-complete
-restore
-show status
-```
-
-Compatibility commands:
-
-```
-svn kmt-complete
-svn kmt-restore
-```
-
-are wrappers around the KMT Manager.
-
----
-
-# Scanning backend
-
-        file scanner
-              |
-       +------+------+
-       |             |
-    python        join
-    scanner      scanner
-
-# Design Principles
-
-## Non-invasive
-
-No SVN server modification is required.
-
-## Metadata Only
-
-File content is unchanged.
-
-Only SVN properties are added:
-
-```
+```text
 file:mtime
 ```
 
-## Safe Processing
+### 21.3 Preserve normal SVN behavior
 
-Before changing timestamps:
+Commands not requiring KMT processing are forwarded directly to the original SVN executable.
 
-* check working copy state
-* check existing metadata
-* compare timestamps
-* avoid overwriting valid information
+### 21.4 Conservative timestamp handling
 
-## Backward Compatible
+The implementation does not blindly overwrite timestamps when the local and repository values disagree.
 
-Repositories without SVN Keep MTime continue working normally.
+### 21.5 Working-copy isolation
+
+KMT metadata management requires an up-to-date working copy and, for modifying KMT operations, a clean working copy.
+
+### 21.6 Simple deployment
+
+The complete implementation is contained in:
+
+```text
+shell/svn_kmt.sh
+```
+
+The same script provides the wrapper, KMT manager, installer, and upgrade logic.
+
+---
+
+## 22. Current Command Surface
+
+### User SVN commands
+
+```text
+svn checkout
+svn update
+svn add
+svn commit
+svn status
+svn revert
+```
+
+### KMT commands
+
+```text
+svn kmt
+svn kmt-ui
+svn kmt-main
+
+svn kmt-complete
+svn kmt-restore
+svn kmt-resolve
+
+svn kmt-version
+svn kmt-uninstall
+```
+
+### Distribution-script commands
+
+```text
+./svn_kmt.sh kmt-install
+./svn_kmt.sh kmt-install --link
+./svn_kmt.sh kmt-upgrade
+```
+
+The installation/upgrade script must remain named:
+
+```text
+svn_kmt.sh
+```
+
+---
+
+## 23. Error and Safety Philosophy
+
+The wrapper favors stopping over silently making an uncertain timestamp decision.
+
+Examples:
+
+```text
+future timestamp
+    -> reject
+
+mtime older than trusted repository time
+    -> reject when safety rule applies
+
+SVN conflict
+    -> report / stop
+
+working copy not up to date
+    -> reject KMT modifying operation
+
+uncommitted changes
+    -> reject KMT modifying operation
+```
+
+This is particularly important because an incorrect `file:mtime` value becomes repository metadata and may later be propagated to other working copies.
