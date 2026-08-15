@@ -13,7 +13,7 @@
 #
 #
 #  Version:
-#      0.7.6
+#      0.7.7
 #
 #
 # ============================================================================
@@ -23,7 +23,7 @@
 # Configuration
 ##############################################################################
 
-SVN_KMT_VERSION="0.7.6"
+SVN_KMT_VERSION="0.7.7"
 
 FILE_MTIME_PROP="file:mtime"
 
@@ -45,7 +45,7 @@ log()
 
     [ -z "$SVN_KMT_DEBUG" ] && return $ret
 
-    [ -n "$log_ts" ] && tsd=$(time_diff "$(date +%s.%N)" "$log_ts") || tsd=$(format_timestamp "$(date +%s)")
+    [ -n "$log_ts" ] && tsd=$(time_diff "$(date +%s.%N)" "$log_ts") || tsd=$(date +%s)
 
     echo "[ + $tsd] $*" >&2
 
@@ -181,7 +181,7 @@ detect_original_svn()
 
 auto_set_kmt_scan_backend()
 {
-    if [ -n "$(find_command 'python')" ]; then
+    if str=$(find_command 'python3') || str=$(find_command 'python') || str=$(find_command 'python2'); then
         SCAN_BACKEND='python'
     elif [ -n "$(find_command 'join')" ] && [ -n "$(find_command 'awk')" ]; then
         SCAN_BACKEND='join'
@@ -378,6 +378,8 @@ is_timestamp()
 }
 
 format_timestamp() {
+#    log "ts: $1, tz: $TZ_SECONDS"
+
     ts=$(($1 + ${2:-"$TZ_SECONDS"}))
     d=$((ts / 86400 + 1))
     s=$((ts % 86400))
@@ -615,133 +617,129 @@ join_scan()
 
     dir=$1
 
-    [ -n "$dir" ] && dir_prefix="$dir/"
+    log "svn scan start... $dir"
 
-    [ "$PLATFORM" = 'linux' ] && cmd="stat -c %n$SEP%Y" || cmd="stat -f "%N$SEP%m""
+    [ "$PLATFORM" = 'linux' ] && stat_cmd="stat -c %n$SEP%Y" || stat_cmd="stat -f "%N$SEP%m""
 
-    log "join scan start"
-
-    ! svn_kmt_org ls -R "$dir" 2>/dev/null |
-        awk -v p="$dir_prefix" '{sub(/\/$/, ""); print p $0}' |
-        tr '\n' '\0' |
-        xargs -0 $cmd 2>/dev/null | LC_ALL=C sort > /tmp/files.$$ && echo "svn ls failed" && return 1
-
-    log "svn ls & stat ok. $dir"
-#    cat /tmp/files.$$ >&2
-
-    ! svn_kmt_org propget "$FILE_MTIME_PROP" -R "$dir" | sed "s/\(.*\) - \(.*\)/\1$SEP\2/" \
-        | LC_ALL=C sort > /tmp/props.$$ && echo "svn propget failed" && return 1
-
-    log "svn propget ok. $dir"
-#    cat /tmp/props.$$ >&2
-
-    ! svn_kmt_org info -R "$dir" --xml 2>/dev/null | awk -v sep="$SEP" '
-    BEGIN { path = ""; date_str = "" }
-    /<entry/ { path = ""; date_str = "" }
-    /path=/ {
-        start = index($0, "path=\"") + 6
-        end = index(substr($0, start), "\"")
-        if (end > 0) {
-            path = substr($0, start, end - 1)
+    ! svn_call info -R "$dir" 2>/dev/null | \
+        grep -E "^(Path:|Text Last Updated:|Last Changed Date:)" | \
+        awk -v sep="$SEP" -v xml_sep="$SEP" -v tz_offset="$TZ_SECONDS" '
+    BEGIN { path = ""; commit_time = "" }
+    /^Path:/ {
+        if (path != "") {
+            print path sep commit_time
+        }
+        path = substr($0, 7)
+        commit_time = ""
+    }
+    /^Last Changed Date:/ {
+        datetime = substr($0, index($0, ":") + 2, 19)
+        commit_time = datetime_to_timestamp(datetime)
+        if (commit_time != "") {
+            commit_time = commit_time
         }
     }
-    /<date>/ {
-        start = index($0, "<date>") + 6
-        end = index($0, "</date>")
-        if (end > start) {
-            date_str = substr($0, start, end - start)
+    END {
+        if (path != "") {
+            print path sep commit_time
         }
     }
-    /<\/entry>/ {
-        if (path != "" && date_str != "") {
+    function datetime_to_timestamp(datetime) {
+        split(datetime, dt_parts, " ")
+        split(dt_parts[1], ymd, "-")
+        split(dt_parts[2], hms, ":")
+        year = ymd[1] + 0; month = ymd[2] + 0; day = ymd[3] + 0
+        hour = hms[1] + 0; minute = hms[2] + 0; second = hms[3] + 0
 
-#            gsub(/Z$/, "", date_str)
-#
-#            gsub(/[+-][0-9]{2}:[0-9]{2}$/, "", date_str)
-#
-#            gsub(/T/, " ", date_str)
+        days = 0
+        for (y = 1970; y < year; y++) {
+            if ((y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)) {
+                days += 366
+            } else {
+                days += 365
+            }
+        }
+        month_days[1] = 31; month_days[2] = 28; month_days[3] = 31
+        month_days[4] = 30; month_days[5] = 31; month_days[6] = 30
+        month_days[7] = 31; month_days[8] = 31; month_days[9] = 30
+        month_days[10] = 31; month_days[11] = 30; month_days[12] = 31
+        if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
+            month_days[2] = 29
+        }
+        for (m = 1; m < month; m++) {
+            days += month_days[m]
+        }
+        days += day - 1
 
-            split(date_str, parts, ".")
-            datetime = parts[1]
+        return days * 86400 + hour * 3600 + minute * 60 + second - tz_offset
+    }
+'  > /tmp/svn_info.$$ && echo "svn info failed" && return 1
 
-            split(datetime, dt_parts, "T")
-            split(dt_parts[1], ymd, "-")
-            split(dt_parts[2], hms, ":")
-            year = ymd[1] + 0
-            month = ymd[2] + 0
-            day = ymd[3] + 0
-            hour = hms[1] + 0
-            minute = hms[2] + 0
-            second = hms[3] + 0
+    awk -F"$SEP" '{print $1}' /tmp/svn_info.$$ > /tmp/all_paths.$$
 
-            days = (year - 1970) * 365
-            leap = 0
-            for (y = 1970; y < year; y++) {
-                if ((y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)) {
-                    leap++
+    log "svn info ok. $dir"
+
+    if [ -s /tmp/all_paths.$$ ]; then
+        cat /tmp/all_paths.$$ |
+        while IFS= read -r line; do printf "%s\0" "$line"
+        done |
+        xargs -0 -P 2 -L 100 $stat_cmd 2>/dev/null > /tmp/stat_results.$$
+
+        log "get mtime ok. $dir"
+
+        sr="/tmp/stat_results.$$"
+
+        ! awk -F"$SEP" -v sep="$SEP" -v fn="$sr" '
+            BEGIN {
+                while ((getline < fn) > 0) {
+                    split($0, parts, sep)
+                    stat_time[parts[1]] = parts[2]
+#                    print "stat result:" $0
                 }
             }
-            days += leap
-
-            month_days[1] = 31; month_days[2] = 28; month_days[3] = 31
-            month_days[4] = 30; month_days[5] = 31; month_days[6] = 30
-            month_days[7] = 31; month_days[8] = 31; month_days[9] = 30
-            month_days[10] = 31; month_days[11] = 30; month_days[12] = 31
-            if ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)) {
-                month_days[2] = 29
+            {
+                path = $1
+                commit_time = $2
+                text_time = (path in stat_time) ? stat_time[path] : ""
+                print path sep text_time sep commit_time
             }
+        ' /tmp/svn_info.$$ | LC_ALL=C sort > /tmp/version.$$ && echo "svn info failed" && return 1
 
-            for (m = 1; m < month; m++) {
-                days += month_days[m]
-            }
-            days += day - 1
+        log "join mtime, commit_time ok. $dir"
 
-            timestamp = days * 86400 + hour * 3600 + minute * 60 + second
-
-            print path sep timestamp
-            path = ""
-            date_str = ""
-        }
-    }
-' | LC_ALL=C sort > /tmp/version.$$ && echo "svn info failed" && return 1
-
-    log "svn status ok $dir"
-
-    LC_ALL=C join -t "$SEP" -a1 -e '' -o '1.1,1.2,2.2' \
-        /tmp/files.$$ \
-        /tmp/props.$$ \
-        2>/dev/null > /tmp/file_props.$$
-
-    ret=$?
-    if [ "$ret" != 0 ]; then
-        #on linux ret:2 means failed, ret:1 means succeed but some rows has not joined
-        if [ "$PLATFORM" != 'linux' ] || [ "$ret" = 2 ]; then
-            echo "Warning: join files.$$ and props.$$ to file_props.$$ failed: $ret"
-            cat /tmp/file_props.$$
-            return 1
-        fi
+    else
+        ! cat /tmp/svn_info.$$ | LC_ALL=C sort > /tmp/version.$$ && echo "svn info failed" && return 1
     fi
 
-    log "join ok. file_props.$$ $dir"
+    ! svn_call propget "$FILE_MTIME_PROP" -R "$dir" | sed "s/\(.*\) - \(.*\)/\1$SEP\2/" \
+        | LC_ALL=C sort > /tmp/props.$$ && echo "svn propget failed" && return 1
 
-    LC_ALL=C join -t "$SEP" -a1 -e '' -o '1.1,1.2,1.3,2.2' \
-        /tmp/file_props.$$ \
+    log "get propget ok. $dir"
+#    cat /tmp/props.$$ ｜ grep "$SEP$"
+#    return 1
+
+    LC_ALL=C join -t "$SEP" -a1 -e '' -o '1.1,1.2,2.2,1.3' \
         /tmp/version.$$ \
+        /tmp/props.$$ \
         2>/dev/null
 
     ret=$?
     if [ "$ret" != 0 ]; then
         #on linux ret:2 means failed, ret:1 means succeed but some rows has not joined
         if [ "$PLATFORM" != 'linux' ] || [ "$ret" = 2 ]; then
-            echo "Warning: join file_props.$$ and version.$$ failed: $ret"
+            echo "Warning: join version.$$ and props.$$ to file_props.$$ failed: $ret"
+            log "version"
             cat /tmp/version.$$
+
+            log "props"
+            cat /tmp/props.$$
             return 1
         fi
     fi
 
-    log "join ok. version.$$ $dir"
-
-    rm -f /tmp/files.$$ /tmp/props.$$ /tmp/version.$$ /tmp/file_props.$$
+    log "join ok. file_props.$$ $dir"
+#    return 1
+    rm -f /tmp/svn_info.$$ /tmp/all_paths.$$ /tmp/stat_results.$$ /tmp/version.$$ /tmp/file_props.$$
 
     return 0
 }
@@ -752,143 +750,95 @@ python_scan()
     shift
 
     if [ "$#" != 0 ] && [ -n "$1" ]; then
-        dir_head="$1/"
         work_dir=", '$dir'"
     else
-        dir_head=""
         work_dir=""
     fi
 
-    python -c "
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
+    cmd=$(find_command "python3") || cmd=$(find_command "python")
+#    cmd="python"
+    "$cmd" -c "
 from __future__ import print_function
-import os
-import sys
-import subprocess
-import datetime
-import xml.etree.ElementTree as ET
+import os, sys, subprocess
+from datetime import datetime
+
+def ts(s):
+    dt = datetime.strptime(s[:19], '%Y-%m-%d %H:%M:%S')
+    return int(dt.timestamp()) if sys.version_info[0] >= 3 else int((dt - datetime(1970,1,1)).total_seconds())
 
 def check_output(cmd, stderr=None, text=True):
     env = os.environ.copy()
     env['LC_ALL'] = 'C'
-    if sys.version_info[0] >= 3:
-        # Python 3
-        if text:
-            return subprocess.check_output(cmd, stderr=stderr, env=env, text=True)
-        else:
-            return subprocess.check_output(cmd, stderr=stderr, env=env)
+    if sys.version_info[0] >= 3 and sys.version_info[1] >= 7:
+        # Python 3.7 +
+        return   subprocess.check_output(cmd, stderr=stderr, env=env, text=text)
     else:
-        # Python 2
         output = subprocess.check_output(cmd, stderr=stderr, env=env)
-
         if text:
             return output.decode('utf-8')
+
         return output
 
+svn_path = sys.argv[1] if len(sys.argv) > 1 else '.'
+
+paths, commits, cur_path, cur_commit = [], {}, None, None
 try:
-    ls_output = check_output(['svn_kmt_org', 'ls', '-R'$work_dir])
-    all_files = ['$dir_head'+f.rstrip('/') for f in ls_output.splitlines()
-#                 if f.strip() and not f.strip().endswith('/')
-                 ]
+    out = check_output(['svn_kmt_org', 'info', '-R'$work_dir])
+#    if sys.version_info[0] < 3: out = out.decode('utf-8')
+    for line in out.splitlines():
+        if line.startswith('Path:'):
+            if cur_path and cur_commit is not None:
+                paths.append(cur_path); commits[cur_path] = cur_commit
+            cur_path, cur_commit = line[6:], None
+        elif line.startswith('Last Changed Date:'):
+            cur_commit = ts(line[18:].strip())
+    if cur_path and cur_commit is not None:
+        paths.append(cur_path); commits[cur_path] = cur_commit
+
 except Exception as e:
     print('Exception:', e)
-    exit(1)
-    all_files = []
-
+    sys.exit(1)
 
 props = {}
 try:
     prop_output = check_output(['svn_kmt_org', 'propget', '$FILE_MTIME_PROP', '-R'$work_dir])
-
     for line in prop_output.splitlines():
-
-#        line = line.strip()
         idx = line.rfind(' - ')
 
         if idx > 0:
             props[line[:idx]] = line[idx+3:]
-except Exception:
+except Exception as e:
     print('Exception:', e)
-    exit(1)
+    sys.exit(1)
 
+for p in paths:
+    try:
+        mtime = str(int(os.stat(p).st_mtime))
+        prop = props.get(p, '')
+        vts = commits.get(p, '')
+    except OSError as e:
+        print('Exception:', e)
+        sys.exit(1)
 
-version_ts = {}
-try:
-    info_output = check_output(['svn_kmt_org', 'info', '--xml', '-R'$work_dir])
-
-    root = ET.fromstring(info_output)
-    epoch = datetime.datetime(1970, 1, 1)
-    for entry in root.findall('.//entry'):
-        path = entry.get('path')
-        if path:
-            date_elem = entry.find('./commit/date')
-            if date_elem is not None and date_elem.text:
-                date_str = date_elem.text
-
-                if date_str.endswith('Z'):
-                    date_str = date_str[:-1]
-
-                elif '+' in date_str:
-                    date_str = date_str.split('+')[0]
-                elif '-' in date_str:
-                    parts = date_str.split('-')
-                    if len(parts) > 3:
-                        date_str = '-'.join(parts[:-1])
-
-                date_str = date_str.replace('T', ' ')
-
-                if '.' in date_str:
-                    date_str = date_str.split('.')[0]
-
-                dt = datetime.datetime.strptime(date_str, '%Y-%m-%d %H:%M:%S')
-
-                if sys.version_info[0] >= 3:
-                    timestamp = int(dt.timestamp())
-                else:
-                    delta = dt - epoch
-                    timestamp = int(delta.total_seconds())
-                version_ts[path] = timestamp
-except Exception, e:
-    print('Exception:', e)
-    exit(1)
-
-for f in all_files:
-    if os.path.exists(f):
-        mtime = int(os.stat(f).st_mtime)
-        prop = props.get(f, '')
-        vts = version_ts.get(f, '')
-        print(\"{}$SEP{}$SEP{}$SEP{}\".format(f, mtime, prop, vts))
-#    else:
-#        print('File not exists. %s'%f)
-#        exit(1)
-
-"
+    print('{}$SEP{}$SEP{}$SEP{}'.format(p, mtime, prop, vts))
+" "$@"
     return $?
 }
 
-exp_add()
-{
-    a=$1
-    b=$2
-
-    echo $(( a+b ))
-}
-
-on_scan()
+on_file_scan()
 {
     file=$1
     file_ts=$2
     prop_ts=$3
     version_ts=$4
 
+    [ "$file" = '.' ] && return 0
+
     checked_count=$(( checked_count+1 ))
 
     [ -z "$file_ts" ] && echo "No file mtime provided: '$file'" && return 1
 
     if [ -n "$prop_ts" ]; then
-#        [ "$cmd" = "show_working_copy" ] || [ "$cmd" = 'complete' ] || [ "$cmd" = "show_to_complete" ] && return 0
-
         if [ "$file_ts" = "$prop_ts" ] || [ -d "$file" ]; then
             [ "$cmd" = "show_completed" ] && echo "Completed $(format_timestamp "$file_ts") $file"
             completed_count=$(( completed_count+1 ))
@@ -896,46 +846,52 @@ on_scan()
         fi
 
         if [ "$file_ts" -gt "$prop_ts" ]; then
-            if [ "$cmd" = "restore" ]; then
-                ! restore_a_file_mtime "$file" "$prop_ts" && echo "Restore failed $(format_timestamp "$prop_ts") '$file'" && return 1
-                echo "Restoring mtime $(format_timestamp "$prop_ts") '$file'"
+            if [ "$cmd" = "synchronize" ]; then
+                ! sync_a_file_mtime "$file" "$prop_ts" && echo "Synchronize failed $(format_timestamp "$prop_ts") '$file'" && return 1
+                echo "Synchronizing mtime $(format_timestamp "$prop_ts") '$file'"
                 effected_count=$(( effected_count+1 ))
             else
-                [ "$cmd" = "show_to_restore" ] && echo "To Restore as $(format_timestamp "$prop_ts") from $(format_timestamp "$file_ts") $file"
-                to_restore_count=$(( to_restore_count+1 ))
+                [ "$cmd" = "show_synchronizable" ] && echo "Synchronizable $(format_timestamp "$prop_ts") from $(format_timestamp "$file_ts") $file"
+                synchronizable_count=$(( synchronizable_count+1 ))
             fi
         else
+
             if [ "$cmd" = "resolve" ]; then
                 ! str=$(save_a_file_mtime "$file" "$file_ts") && echo "$str" && return 1
                 echo "Resolve conflicting mtime $(format_timestamp "$prop_ts") replace with $(format_timestamp "$file_ts") '$file'"
                 effected_count=$(( effected_count+1 ))
             else
                 conflict_count=$(( conflict_count+1 ))
+#                log "prop_ts: $prop_ts, file_ts: $file_ts"
                 [ "$cmd" = "show_conflict" ] && echo "Conflict mtime repos: $(format_timestamp "$prop_ts") local: $(format_timestamp "$file_ts") $file"
             fi
         fi
     else
-#        [ "$cmd" = "show_completed" ] || [ "$cmd" = "restore" ] || [ "$cmd" = "show_to_restore" ] ||
-#            [ "$cmd" = "show_conflict" ] || [ "$cmd" = "resolve" ] && return 0
-
         [ -z "$version_ts" ] && echo "No versioned timestamp provided: '$file'" && return 1
 
         if [ "$file_ts" -ge "$version_ts" ]; then
-            [ "$cmd" = "show_working_copy" ] && echo "Working Copy $(format_timestamp "$file_ts") $file"
-            nometa_copy_count=$(( nometa_copy_count+1 ))
+            [ "$cmd" = "show_unsynchronizable" ] && echo "Unsynchronizable $(format_timestamp "$version_ts") $(format_timestamp "$file_ts") $file"
+            unsynchronizable_count=$(( unsynchronizable_count+1 ))
         else
             if [ "$cmd" = 'complete' ]; then
-                ! save_a_file_mtime "$file" "$file_ts" && echo "Commit mtime failed $(format_timestamp "$file_ts") '$file'" &&  return 1
-                echo "Committing mtime $(format_timestamp "$file_ts") '$file'"
+                ! save_a_file_mtime "$file" "$file_ts" && echo "Complete mtime failed $(format_timestamp "$version_ts") $(format_timestamp "$file_ts") '$file'" &&  return 1
+                echo "Completing mtime $(format_timestamp "$file_ts") '$file'"
                 effected_count=$(( effected_count+1 ))
             else
-                [ "$cmd" = "show_to_complete" ] && echo "To Commit $(format_timestamp "$version_ts") $(format_timestamp "$file_ts") $file"
-                to_commit_count=$(( to_commit_count+1 ))
+                [ "$cmd" = "show_completable" ] && echo "Completable $(format_timestamp "$version_ts") $(format_timestamp "$file_ts") $file"
+                completable_count=$(( completable_count+1 ))
             fi
         fi
     fi
 
     return 0
+}
+
+fix_len()
+{
+    str=$1
+    len=$2
+    printf "% ${len}s" "$str"
 }
 
 kmt_command()
@@ -951,11 +907,12 @@ kmt_command()
 
     checked_count=0
     completed_count=0
-    to_commit_count=0
-    to_restore_count=0
-    effected_count=0
+    completable_count=0
+    synchronizable_count=0
     conflict_count=0
-    nometa_copy_count=0
+    unsynchronizable_count=0
+
+    effected_count=0
 
     dirs=$(select_arg_dirs "$@")
 
@@ -989,34 +946,37 @@ EOF
     done << EOF
 $dirs
 EOF
+    [ "$cmd" = 'sync' ] && cmd='synchronize'
 
     case $cmd in
         scan)
-            echo "Scanning file mtime status of versioned files..."
-            ;;
-        show_to_complete)
-            echo "Listing files to complete metadata..."
-            ;;
-        show_to_restore)
-            echo "Listing files to restore..."
+            dirs_inline=$(echo "$dirs" | tr '\n' ' ' | sed 's/[ \t]*$//')
+
+            echo "Scanning versioned files in directories $dirs_inline..."
             ;;
         show_completed)
             echo "Listing completed files..."
             ;;
-        show_working_copy)
-            echo "Listing working copy files without metadata..."
+        show_completable)
+            echo "Listing mtime completable files..."
+            ;;
+        show_synchronizable)
+            echo "Listing mtime synchronizable files..."
             ;;
         show_conflict)
-            echo "Listing conflicting files..."
+            echo "Listing files with mtime conflicts..."
+            ;;
+        show_unsynchronizable)
+            echo "Listing files unable to synchronize due to file:mtime not completed..."
             ;;
         complete)
-            echo "Committing file:mtime metadata..."
+            echo "Completing file:mtime from local file mtime..."
             ;;
-        restore)
-            echo "Restoring file:mtime metadata..."
+        synchronize)
+            echo "Synchronizing local mtime from repository metadata..."
             ;;
         resolve)
-            echo "Resolve mtime conflicting ..."
+            echo "Resolving mtime conflicts (use local file mtime)..."
             ;;
         *)
             echo "Invalid command $cmd"
@@ -1041,13 +1001,11 @@ EOF
                 ! str=$(join_scan "$SEP" "$dir") && echo "$str" && echo "join scan failed" && return 1
             fi
 
-#            echo "$str"
-
             log "on scanned: $dir"
 
             [ -n "$str" ] && while IFS="$SEP" read -r file file_ts prop_ts version_ts
             do
-                ! on_scan "$file" "$file_ts" "$prop_ts" "$version_ts" && return 1
+                ! on_file_scan "$file" "$file_ts" "$prop_ts" "$version_ts" && return 1
             done << EOF
 $str
 EOF
@@ -1073,7 +1031,7 @@ EOF
                 ! version_ts=$(get_versioned_timestamp "$file") || [ -z "$version_ts" ] && echo "Get versioned timestamp failed: '$file'" && return 0
             fi
 
-            ! on_scan "$file" "$file_ts" "$prop_ts" "$version_ts" && return 1
+            ! on_file_scan "$file" "$file_ts" "$prop_ts" "$version_ts" && return 1
 
         done << EOF
 $str
@@ -1091,21 +1049,23 @@ EOF
     echo ""
     case "$cmd" in
      "scan")
+        lc=${#checked_count}
         cat << EOF
 Versioned files checked:  $checked_count
-    Completed:      $completed_count
-    To complete:    $to_commit_count
-    To restore:     $to_restore_count
-    Conflicts:      $conflict_count
-    No metadata:    $nometa_copy_count
+      Completed:          $(fix_len "$completed_count" "$lc")
+      Completable:        $(fix_len "$completable_count" "$lc")
+      Synchronizable:     $(fix_len "$synchronizable_count" "$lc")
+      Conflicts:          $(fix_len "$conflict_count" "$lc")
+      Unsynchronizable:   $(fix_len "$unsynchronizable_count" "$lc")
+
 EOF
         ;;
     'complete')
         if [ "$effected_count" = 0 ]; then
-            echo "No files need to complete mtime."
+            echo "No files completed"
         else
             if svn_call commit "$@" -m "Completed file mtime for $effected_count files"; then
-                echo "Committed ${effected_count} files successfully."
+                echo "Completed ${effected_count} files successfully."
                 completed_count=$(( completed_count+effected_count ))
 
                 ! svn up "$@" && echo "SVN update to date failed"
@@ -1115,9 +1075,17 @@ EOF
             fi
         fi
         ;;
+    'synchronize')
+        if [ "$effected_count" = 0 ]; then
+            echo "No files synchronized"
+        else
+            echo "Synchronized ${effected_count} files successfully."
+            completed_count=$(( completed_count+effected_count ))
+        fi
+        ;;
     'resolve')
         if [ "$effected_count" = 0 ]; then
-            echo "No files need to resolve conflicting mtime."
+            echo "No files resolved"
         else
             if svn_call commit "$@" -m "Resolved file mtime for $effected_count files"; then
                 echo "Resolved ${effected_count} files successfully."
@@ -1130,25 +1098,25 @@ EOF
             fi
         fi
         ;;
-    'restore')
-        if [ "$effected_count" = 0 ]; then
-            echo "No files need to restore mtime."
-        else
-            echo "Restored ${effected_count} files successfully."
-            completed_count=$(( completed_count+effected_count ))
-        fi
-        ;;
     'show_completed')
         echo "$completed_count completed files."
         ;;
-    'show_to_complete')
-        echo "$to_commit_count files need to complete."
+    'show_completable')
+        echo "$completable_count files completable."
         ;;
-    'show_to_restore')
-        echo "$to_restore_count files need to restore."
+    'show_synchronizable')
+        echo "$synchronizable_count files synchronizable."
         ;;
-    'show_working_copy')
-        echo "$nometa_copy_count working copy files."
+    'show_unsynchronizable')
+        echo "$unsynchronizable_count unsynchronizable files."
+        echo '
+Unable to synchronize files:
+  These files do not have file:mtime metadata in the repository.
+  This working copy is not eligible to complete them.
+  They should be completed from a working copy that still contains
+  the original file modification times.
+  Once completed, they become synchronizable.
+'
         ;;
     'show_conflict')
         echo "$conflict_count mtime conflicting files."
@@ -1285,9 +1253,9 @@ EOF
 }
 
 ##############################################################################
-# Restore File Mtime
+# Sync File Mtime
 ##############################################################################
-restore_a_file_mtime()
+sync_a_file_mtime()
 {
     file=$1
     prop_ts=$2
@@ -1297,9 +1265,9 @@ restore_a_file_mtime()
     [ -z "$prop_ts" ] && return 1
 
     if ! set_file_mtime "$file" "$prop_ts"; then
-        log "Failed to restore mtime $(format_timestamp "$prop_ts") $file"
+        log "Failed to set mtime $(format_timestamp "$prop_ts") $file"
     else
-        log "Restored mtime $(format_timestamp "$prop_ts") $file successfully"
+        log "Synchronized mtime $(format_timestamp "$prop_ts") $file successfully"
     fi
 
     return $ret
@@ -1383,7 +1351,7 @@ svn_hook_line()
                     fi
                 fi
 
-                restore_a_file_mtime "$file" "$prop_ts" || return 1
+                sync_a_file_mtime "$file" "$prop_ts" || return 1
 
                 if [ "$flag" = "Restored" ] || [ "$flag" = "Reverted" ]; then
                     file="'$file'"
@@ -1456,7 +1424,7 @@ kmt_command_handler()
     do
         case "$p" in
             --scan-backend=*)
-                shift
+                [ "$1" = "$p" ] && shift
                 ! set_kmt_scan_backend "${p#*=}" && return 1
             ;;
         esac
@@ -1468,6 +1436,7 @@ kmt_command_handler()
 
     echo "Scanning Backend: $SCAN_BACKEND"
     echo "Current Directory: $(pwd)"
+    echo ""
 
 
     if [ -z "$cmd" ] || [ "$cmd" = "ui" ] || [ "$cmd" = "main" ]; then
@@ -1505,21 +1474,28 @@ kmt_ui()
 
     while true
     do
-            cat << EOF
+          [ -n "$checked_count" ] && files_count="[$checked_count files]" || files_count=
 
+          cat << EOF
 Select an operation:
 
-    1   -- Scan the directories (${dirs_inline:-.}) $checked_count
+  -- Scan --
 
-    2   -- List the completed files $completed_count
-    3   -- List the files needing metadata completion $to_commit_count
-    4   -- List the files needing mtime restoration $to_restore_count
+    1   -- Scan directories (${dirs_inline:-.}) $files_count
+
+  -- Inspect --
+
+    2   -- List mtime completed files $completed_count
+    3   -- List mtime completable files $completable_count
+    4   -- List mtime synchronizable files $synchronizable_count
     5   -- List files with mtime conflicts $conflict_count
-    6   -- List working copy files without file:mtime metadata $nometa_copy_count
+    6   -- List mtime unsynchronizable files (file:mtime not completed) $unsynchronizable_count
 
-    7   -- Complete file:mtime metadata ( with local file mtime ) $to_commit_count
-    8   -- Restore local file mtime ( with the metadata in repos ) $to_restore_count
-    9   -- Resolve mtime conflicts ( try use local file mtime ) $conflict_count
+  -- Modify --
+
+    7   -- Complete file:mtime from local file mtime $completable_count
+    8   -- Synchronize local mtime from repository metadata $synchronizable_count
+    9   -- Resolve mtime conflicts (try use local file mtime) $conflict_count
 
   Other -- Exit
 
@@ -1535,22 +1511,22 @@ EOF
                 cmd=show_completed  ;;
 
             3)
-                cmd=show_to_complete ;;
+                cmd=show_completable ;;
 
             4)
-                cmd=show_to_restore ;;
+                cmd=show_synchronizable ;;
 
             5)
                 cmd=show_conflict ;;
 
             6)
-                cmd=show_working_copy ;;
+                cmd=show_unsynchronizable ;;
 
             7)
                 cmd=complete ;;
 
             8)
-                cmd=restore ;;
+                cmd=synchronize ;;
 
             9)
                 cmd=resolve ;;
@@ -1664,7 +1640,7 @@ please run the command as follows to install it:
 
             ;;
 
-        kmt-complete|kmt-restore|kmt-resolve)
+        kmt-scan|kmt-complete|kmt-synchronize|kmt-sync|kmt-resolve)
 
             shift
 
