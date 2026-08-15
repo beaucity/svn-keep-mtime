@@ -918,6 +918,8 @@ kmt_command()
 
     while IFS= read -r dir
     do
+#        ! str=$(svn_call info "$dir" 2>&1) && echo "$str" && return 1
+
         ! is_update_to_date "$dir" && echo "The working copy '${dir:-.}' is not update to date." && return 1
 
         if [ "$cmd" = 'complete' ] || [ "$cmd" = 'restore' ] || [ "$cmd" = 'resolve' ]; then
@@ -1431,6 +1433,14 @@ kmt_command_handler()
     done
 
     [ -z "$SCAN_BACKEND" ] && ! auto_set_kmt_scan_backend && return 1
+
+    dirs=$(select_arg_dirs "$@")
+    while IFS= read -r dir
+    do
+        ! str=$(svn_call info "$dir" 2>&1) && echo "$str" && return 1
+    done << EOF
+$dirs
+EOF
 
     show_version
 
