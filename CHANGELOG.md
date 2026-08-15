@@ -73,3 +73,9 @@
 ### Changed
 
 - Enhance scanning performance
+
+## 0.7.8
+
+### Changed
+
+- Enhance scanning performance

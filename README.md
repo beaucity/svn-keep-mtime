@@ -763,5 +763,5 @@ Debug messages are written to standard error.
 Current version:
 
 ``` text
-0.7.7
+0.7.8
 ```
