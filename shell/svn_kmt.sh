@@ -1495,7 +1495,7 @@ Select an operation:
 
     7   -- Complete file:mtime from local file mtime $completable_count
     8   -- Synchronize local mtime from repository metadata $synchronizable_count
-    9   -- Resolve mtime conflicts (try use local file mtime) $conflict_count
+    9   -- Resolve mtime conflicts (use local file mtime) $conflict_count
 
   Other -- Exit
 

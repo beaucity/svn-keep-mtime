@@ -67,3 +67,9 @@
 ### Added
 
 - Add quick start on readme
+
+## 0.7.7
+
+### Changed
+
+- Enhance scanning performance
