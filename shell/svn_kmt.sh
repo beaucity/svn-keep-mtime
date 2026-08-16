@@ -136,10 +136,15 @@ detect_time_offset()
 {
     max_offset=60
 
+    shift
     dirs=$(select_arg_dirs "$@")
     url=
     while IFS= read -r dir
     do
+        [ -z "$dir" ] && dir='.'
+
+        [ ! -e "$dir" ] && continue
+
         url=$(svn_call info "$dir" | grep '^URL:' | grep -oE 'http[s]?://[^/]*')
         [ -n "$url" ] && break
     done<<EOF
