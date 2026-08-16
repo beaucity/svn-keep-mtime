@@ -136,7 +136,6 @@ detect_time_offset()
 {
     max_offset=60
 
-    shift
     dirs=$(select_arg_dirs "$@")
     url=
     while IFS= read -r dir
@@ -1447,7 +1446,7 @@ svn_hook_line()
     return 0
 }
 
-command_handler()
+svn_command_handler()
 {
     cmd=$1
 
@@ -1455,6 +1454,8 @@ command_handler()
 
     if [ "$cmd" = 'commit' ]; then
         shift
+
+        ! detect_time_offset "$@" && return 1
 
         dirs=$(select_arg_dirs "$@")
 
@@ -1516,6 +1517,8 @@ kmt_command_handler()
     done << EOF
 $dirs
 EOF
+
+    ! detect_time_offset "$@" && return 1
 
     show_version
 
@@ -1689,7 +1692,7 @@ please run the command as follows to install it:
 
             shift
 
-            command_handler commit "$@"
+            svn_command_handler commit "$@"
 
             ;;
 
@@ -1698,7 +1701,7 @@ please run the command as follows to install it:
 
             shift
 
-            command_handler update "$@"
+            svn_command_handler update "$@"
 
             ;;
 
@@ -1706,7 +1709,7 @@ please run the command as follows to install it:
 
             shift
 
-            command_handler revert "$@"
+            svn_command_handler revert "$@"
 
             ;;
 
@@ -1714,7 +1717,7 @@ please run the command as follows to install it:
 
             shift
 
-            command_handler checkout "$@"
+            svn_command_handler checkout "$@"
 
             ;;
 
@@ -1783,8 +1786,7 @@ main()
 
     detect_platform &&
     detect_time_zone &&
-    detect_original_svn &&
-    detect_time_offset "$@" || return 1
+    detect_original_svn || return 1
 
     dispatch "$@"
 }
