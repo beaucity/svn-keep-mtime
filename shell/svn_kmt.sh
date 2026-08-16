@@ -899,6 +899,30 @@ for p in paths:
     return $?
 }
 
+get_last_commit_ts()
+{
+    path="${1:-.}"
+    last_id="${2:-1}"
+
+    ! lines=$(svn_call log -l "$last_id" "$path") && return 1
+
+    line=$(echo "$lines" | grep -E '^r[0-9]' | sed -n "${last_id}p")
+
+    [ -z "$line" ] && echo 0 && return 0
+
+    date_str=$(echo "$line" | awk -F'|' '{print $3}' | sed 's/^[[:space:]]*//' | awk '{print $1, $2, $3}')
+
+    [ -z "$date_str" ] && return 1
+
+    if [ "$PLATFORM" = 'macos' ]; then
+        ! LC_TIME=C date -j -f "%Y-%m-%d %H:%M:%S %z" "$date_str" +%s && return 1
+    else
+        ! LC_TIME=C date -d "$date_str" +%s && return 1
+    fi
+
+    return 0
+}
+
 on_file_scan()
 {
     file=$1
@@ -919,27 +943,40 @@ on_file_scan()
             return 0
         fi
 
-        if [ "$file_ts" -gt "$prop_ts" ]; then
-            if [ "$cmd" = "synchronize" ]; then
-                ! sync_a_file_mtime "$file" "$prop_ts" && echo "Synchronize failed $(format_timestamp "$prop_ts") '$file'" && return 1
-                echo "Synchronizing mtime $(format_timestamp "$prop_ts") '$file'"
-                effected_count=$(( effected_count+1 ))
-            else
-                [ "$cmd" = "show_synchronizable" ] && echo "Synchronizable $(format_timestamp "$prop_ts") from $(format_timestamp "$file_ts") $file"
-                synchronizable_count=$(( synchronizable_count+1 ))
-            fi
-        else
+        if [ "$file_ts" -lt "$prop_ts" ]; then
+#             COMMENT-COMPLETE-CONFLICT
+#             a mtime completed file has 2 commits at least, [svn add] and [svn kmt-complete]
+#             all the mtime between last_3rd_commit_time to last_commit_time are completable
+#             if file_ts < prop_ts, the prop_ts completed by peers may wrong, this working copy maybe is
+#             the right orign mtime
+            ! l3rd_ts=$(get_last_commit_ts "$file" 3) && echo "Get last 3rd commit time failed. '$file'" && return 1
 
-            if [ "$cmd" = "resolve" ]; then
-                ! str=$(save_a_file_mtime "$file" "$file_ts") && echo "$str" && return 1
-                echo "Resolve conflicting mtime $(format_timestamp "$prop_ts") replace with $(format_timestamp "$file_ts") '$file'"
-                effected_count=$(( effected_count+1 ))
+            if [ "$file_ts" -gt "$l3rd_ts" ]; then
+                if [ "$cmd" = "resolve" ]; then
+                    ! str=$(save_a_file_mtime "$file" "$file_ts") && echo "$str" && return 1
+                    echo "Resolve conflicting mtime $(format_timestamp "$prop_ts") replace with $(format_timestamp "$file_ts") '$file'"
+                    effected_count=$(( effected_count+1 ))
+                else
+                    conflict_count=$(( conflict_count+1 ))
+    #                log "prop_ts: $prop_ts, file_ts: $file_ts"
+                    [ "$cmd" = "show_conflict" ] && echo "Conflict mtime repos: $(format_timestamp "$prop_ts") local: $(format_timestamp "$file_ts") $file"
+                fi
+
+                return 0
             else
-                conflict_count=$(( conflict_count+1 ))
-#                log "prop_ts: $prop_ts, file_ts: $file_ts"
-                [ "$cmd" = "show_conflict" ] && echo "Conflict mtime repos: $(format_timestamp "$prop_ts") local: $(format_timestamp "$file_ts") $file"
+                log "Out of date file_ts: $file_ts, l3rd_ts: $l3rd_ts, prop_ts: $prop_ts"
             fi
         fi
+
+        if [ "$cmd" = "synchronize" ]; then
+            ! sync_a_file_mtime "$file" "$prop_ts" && echo "Synchronize failed $(format_timestamp "$prop_ts") '$file'" && return 1
+            echo "Synchronizing mtime $(format_timestamp "$prop_ts") '$file'"
+            effected_count=$(( effected_count+1 ))
+        else
+            [ "$cmd" = "show_synchronizable" ] && echo "Synchronizable $(format_timestamp "$prop_ts") from $(format_timestamp "$file_ts") $file"
+            synchronizable_count=$(( synchronizable_count+1 ))
+        fi
+
     else
         [ -z "$version_ts" ] && echo "No versioned timestamp provided: '$file'" && return 1
 
@@ -992,7 +1029,6 @@ kmt_command()
 
     while IFS= read -r dir
     do
-#        ! str=$(svn_call info "$dir" 2>&1) && echo "$str" && return 1
 
         ! is_update_to_date "$dir" && echo "The working copy '${dir:-.}' is not update to date." && return 1
 
@@ -1411,7 +1447,8 @@ svn_hook_line()
 
             if [ "$flag" != "Sending" ] && [ "$flag" != "Adding" ]; then
                 if [ "$flag" = " U" ]; then
-                    #the mtime was been completed
+#                   the " U" flag means the mtime has been completed, but not file content committed
+#                   on completed by peers
                     if ! file_ts=$(get_file_mtime "$file"); then
                         echo "$file_ts"
                         return 1
@@ -1419,11 +1456,16 @@ svn_hook_line()
 
                     log "prop: $(format_timestamp "$prop_ts"), local: $(format_timestamp "$file_ts")  $file"
 
-                    if [ "$prop_ts" -gt "$file_ts" ]; then
-                        #the file:mtime metadata completed may wrong, the local is the right one maybe
-                        echo "${p1}Conflicting mtime $(format_timestamp "$prop_ts") with local $(format_timestamp "$file_ts")  $file"
-                        log "Conflicting mtime  $(format_timestamp "$prop_ts")"
-                        return 0
+                    if [ "$file_ts" -lt "$prop_ts" ]; then
+                        ! l3rd_ts=$(get_last_commit_ts "$file" 3) && echo "Get last 3rd commit time failed. '$file'" && return 1
+                        if [ "$file_ts" -gt "$l3rd_ts" ]; then
+#                           see COMMENT-COMPLETE-CONFLICT
+                            echo "${p1}Conflicting mtime $(format_timestamp "$prop_ts") with local $(format_timestamp "$file_ts")  $file"
+                            log "Conflicting mtime  $(format_timestamp "$prop_ts")"
+                            return 0
+                        else
+                            log "Out of date file_ts: $file_ts, l3rd_ts: $l3rd_ts, prop_ts: $prop_ts"
+                        fi
                     fi
                 fi
 
