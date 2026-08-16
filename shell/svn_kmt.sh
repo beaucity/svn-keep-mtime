@@ -124,7 +124,7 @@ get_url_timestamp() {
 
     if [ "$PLATFORM" = "macos" ]; then
         clean=$(echo "$date_str" | sed 's/,//')
-        ! LC_TIME=C date -j -f "%a %d %b %Y %H:%M:%S %Z" "$clean" +%s >/dev/null && return 1
+        ! LC_TIME=C date -j -f "%a %d %b %Y %H:%M:%S %Z" "$clean" +%s 2>/dev/null && return 1
     else
         ! LC_TIME=C date -d "$date_str" +%s 2>/dev/null && return 1
     fi
@@ -152,13 +152,15 @@ EOF
 
         ! server_ts=$(get_url_timestamp "$web_server") && echo "request failed $web_server" && continue
 
+        [ -z "$server_ts" ] && echo "Invalid timestamp $server_ts" && continue
+
         now_ts=$(date +%s)
         diff=$((now_ts-server_ts))
         sign=$(echo "$diff" | cut -c 1-1 )
         diff=${diff#*-}
 
         if [ "$diff" -gt "$max_offset" ]; then
-            echo "Local machine system time seems incorrect,
+            echo "Local machine system time seems incorrect $diff, $now_ts, $server_ts,
 are you sure to continue? (y/N)"
             read -r key
             [ "$key" != "y" ] && return 1
