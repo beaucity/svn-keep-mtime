@@ -67,15 +67,27 @@ full_path_name()
     return 0
 }
 
-time_diff() {
+float_diff() {
     a="$1" b="$2"
-    fa="${a#*.}000000"; fa=$(printf "%s" "$fa" | cut -c 1-6 | sed 's/^0*//')
-    fb="${b#*.}000000"; fb=$(printf "%s" "$fb" | cut -c 1-6 | sed 's/^0*//')
-    ia="${a%%.*}" ib="${b%%.*}"
-#    log "$ia $fa $ib $fb"
-    diff=$(( (ia * 1000000 + fa) - (ib * 1000000 + fb) ))
+
+    case "$a" in
+        *.*) ia="${a%%.*}"; fa=$(printf "%s" "${a#*.}000000" | cut -c 1-6 | sed 's/^0*//') ;;
+        *) ia=$a; fa="0" ;;
+    esac
+
+    case "$b" in
+        *.*) ib="${b%%.*}"; fb=$(printf "%s" "${b#*.}000000" | cut -c 1-6 | sed 's/^0*//') ;;
+        *) ib=$b; fb="0" ;;
+    esac
+
+    [ "$(echo "$ia" | cut -c 1-1)" = "-" ] && sa='-1' && ia=$(echo "$ia" | cut -c 2-) || sa='1'
+    [ "$(echo "$ib" | cut -c 1-1)" = "-" ] && sb='-1' && ib=$(echo "$ib" | cut -c 2-) || sb='1'
+
+    log "$a, $b, $ia, $fa, $ib, $fb"
+    ! diff=$(( (sa)*(ia * 1000000 + fa) - (sb)*(ib * 1000000 + fb) )) && echo "exp failed: $a $b $ia $fa $ib $fb" && return 1
     sign=""; [ "$diff" -lt 0 ] && sign="-" && diff=$(( -diff ))
     printf "%s%d.%06d" "$sign" $((diff / 1000000)) $((diff % 1000000))
+    return 0
 }
 
 ##############################################################################
@@ -100,6 +112,62 @@ detect_platform()
             ;;
 
     esac
+}
+
+get_url_timestamp() {
+    url="$1"
+    ! str=$(curl --connect-timeout 2 --max-time 3 -s -I "$url" 2>/dev/null) && return 1
+
+    date_str=$(echo "$str" | grep -i "^Date:" | head -1 | sed 's/^[Dd][Aa][Tt][Ee]: //' | tr -d '\r\n')
+
+    [ -z "$date_str" ] && echo "Request failed. $url" && return 1
+
+    if [ "$PLATFORM" = "macos" ]; then
+        clean=$(echo "$date_str" | sed 's/,//')
+        ! LC_TIME=C date -j -f "%a %d %b %Y %H:%M:%S %Z" "$clean" +%s && return 1
+    else
+        ! date -d "$date_str" +%s 2 && return 1
+    fi
+
+    return 0
+}
+
+detect_time_offset()
+{
+    max_offset=60
+
+    dirs=$(select_arg_dirs "$@")
+    url=
+    while IFS= read -r dir
+    do
+        url=$(svn_call info "$dir" | grep '^URL:' | grep -oE 'http[s]?://[^/]*')
+        [ -n "$url" ] && break
+    done<<EOF
+$dirs
+EOF
+
+    for web_server in "$url" "http://www.baidu.com" "http://www.google.com";
+    do
+        [ -z "$url" ] && continue
+
+        ! server_ts=$(get_url_timestamp "$web_server") && echo "request failed $web_server" && continue
+
+        now_ts=$(date +%s)
+        diff=$((now_ts-server_ts))
+        sign=$(echo "$diff" | cut -c 1-1 )
+        diff=${diff#*-}
+
+        if [ "$diff" -gt "$max_offset" ]; then
+            echo "Local machine system time seems incorrect,
+are you sure to continue? (y/N)"
+            read -r key
+            [ "$key" != "y" ] && return 1
+        fi
+
+        break
+    done
+
+    return 0
 }
 
 detect_time_zone()
@@ -1044,7 +1112,7 @@ EOF
     start=$(echo "$start" | sed 's/0*$//')
     end=$(echo "$end" | sed 's/0*$//')
 #    log "diff: $end - $start"
-    duration=$(time_diff "$end" "$start")
+    duration=$(float_diff "$end" "$start")
 
     echo "Done."
     echo "Elapsed time(s): ${duration} by $SCAN_BACKEND"
@@ -1708,7 +1776,8 @@ main()
 
     detect_platform &&
     detect_time_zone &&
-    detect_original_svn || return 1
+    detect_original_svn &&
+    detect_time_offset "$@" || return 1
 
     dispatch "$@"
 }
