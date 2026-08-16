@@ -124,9 +124,9 @@ get_url_timestamp() {
 
     if [ "$PLATFORM" = "macos" ]; then
         clean=$(echo "$date_str" | sed 's/,//')
-        ! LC_TIME=C date -j -f "%a %d %b %Y %H:%M:%S %Z" "$clean" +%s && return 1
+        ! LC_TIME=C date -j -f "%a %d %b %Y %H:%M:%S %Z" "$clean" +%s >/dev/null && return 1
     else
-        ! date -d "$date_str" +%s 2 && return 1
+        ! LC_TIME=C date -d "$date_str" +%s 2>/dev/null && return 1
     fi
 
     return 0
@@ -148,7 +148,7 @@ EOF
 
     for web_server in "$url" "http://www.baidu.com" "http://www.google.com";
     do
-        [ -z "$url" ] && continue
+        [ -z "$web_server" ] && continue
 
         ! server_ts=$(get_url_timestamp "$web_server") && echo "request failed $web_server" && continue
 
