@@ -20,30 +20,20 @@
 
 
 ##############################################################################
-# Configuration
+# Utility
 ##############################################################################
-
-SVN_KMT_VERSION="0.7.8"
-
-FILE_MTIME_PROP="file:mtime"
-
-SVN=""
 
 PLATFORM=""
 
-SCAN_BACKEND=
+KMT_DEBUG=
 
 TZ_SECONDS=0
-
-##############################################################################
-# Utility
-##############################################################################
 
 log()
 {
     ret=$?
 
-    [ -z "$SVN_KMT_DEBUG" ] && return $ret
+    [ -z "$KMT_DEBUG" ] && return $ret
 
     [ -n "$log_ts" ] && tsd=$(time_diff "$(date +%s.%N)" "$log_ts") || tsd=$(date +%s)
 
@@ -52,6 +42,18 @@ log()
     log_ts=$(date +%s.%N)
 
     return $ret
+}
+
+set_debug_mode()
+{
+    KMT_DEBUG=${1:-1}
+}
+
+fix_len()
+{
+    str=$1
+    len=$2
+    printf "% ${len}s" "$str"
 }
 
 full_path_name()
@@ -191,10 +193,6 @@ detect_time_zone()
     return 0
 }
 
-##############################################################################
-# Original SVN Detection
-##############################################################################
-
 find_command()
 {
     ! path=$(command -v "${1}" 2>/dev/null) || [ ! -x "$path" ] && return 1
@@ -203,6 +201,167 @@ find_command()
 
     return 0
 }
+
+##############################################################################
+# Time Functions
+##############################################################################
+
+is_timestamp()
+{
+    echo "$1" | grep -Eq '^[0-9]+$'
+}
+
+format_timestamp() {
+#    log "ts: $1, tz: $TZ_SECONDS"
+
+    ts=$(($1 + ${2:-"$TZ_SECONDS"}))
+    d=$((ts / 86400 + 1))
+    s=$((ts % 86400))
+    [ "$s" -lt 0 ] && s=$((s + 86400)) && d=$((d - 1))
+
+    y=1970
+    while true; do
+        leap=0
+        [ $((y % 4)) -eq 0 ] && { [ $((y % 100)) -ne 0 ] || [ $((y % 400)) -eq 0 ]; } && leap=1
+        days=365; [ "$leap" -eq 1 ] && days=366
+        [ "$d" -gt "$days" ] || break
+        d=$((d - days)); y=$((y + 1))
+    done
+
+    m=1
+    while true; do
+        leap=0
+        [ $((y % 4)) -eq 0 ] && { [ $((y % 100)) -ne 0 ] || [ $((y % 400)) -eq 0 ]; } && leap=1
+        case "$m" in
+            1|3|5|7|8|10|12) dm=31 ;;
+            4|6|9|11) dm=30 ;;
+            2) dm=$((leap ? 29 : 28)) ;;
+        esac
+        [ "$d" -gt "$dm" ] || break
+        d=$((d - dm)); m=$((m + 1))
+    done
+
+    printf "%04d-%02d-%02d %02d:%02d:%02d" "$y" "$m" "$d" $((s/3600)) $(((s%3600)/60)) $((s%60))
+}
+
+get_file_mtime()
+{
+    file="$1"
+
+    case "$PLATFORM" in
+
+        linux)
+
+            if ! stat -c %Y "$file"; then
+                echo "get_file_mtime failed: '$file'"
+                return 1
+            fi
+            ;;
+
+
+        macos)
+
+            if ! stat -f %m "$file"; then
+                echo "get_file_mtime failed: '$file'"
+                return 1
+            fi
+            ;;
+
+        *)
+
+            return 1
+            ;;
+
+    esac
+
+    return 0
+}
+
+set_file_mtime()
+{
+    file="$1"
+    timestamp="$2"
+
+    is_timestamp "$timestamp" || return 1
+
+    case "$PLATFORM" in
+
+        linux)
+
+            touch -m -d "@$timestamp" "$file" || return 1
+
+            ;;
+
+        macos)
+
+            touch -m \
+                -t "$(date -r "$timestamp" "+%Y%m%d%H%M.%S")" \
+                "$file" || return 1
+
+            ;;
+
+        *)
+
+            return 1
+            ;;
+
+    esac
+}
+
+get_timestamp()
+{
+    dt=$1
+
+    [ -z "$dt" ] && return 0
+
+    case "$PLATFORM" in
+        linux)
+            date -u -d "$dt" +%s
+            ;;
+        macos)
+            dt="${dt%%.*}Z"
+            date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$dt" +%s
+            ;;
+    esac
+}
+
+select_arg_dirs()
+{
+    for p in "$@";
+    do
+        case "$p" in
+            -*)
+                opt_key=$p
+                #Skip option key
+                continue
+            ;;
+
+            *)
+                if [ "$opt_key" = '-m' ]; then
+                  #Skip comment content
+                  opt_key=
+                  continue
+                else
+                    if [ -n "$opt_key" ] && [ ! -e "$p" ]; then
+                        #It is mostly a option value, skip it
+                        opt_key=
+                        continue
+                    fi
+                    opt_key=
+                fi
+            ;;
+        esac
+        echo "$p"
+    done
+
+    return 0
+}
+
+##############################################################################
+# Installation API
+##############################################################################
+
+SVN=""
 
 kmt_is_installed()
 {
@@ -243,50 +402,14 @@ kmt_has_been_uninstalled()
 
 detect_original_svn()
 {
-    if ! SVN=$(find_command svn); then
+    if ! svn=$(find_command svn); then
         echo "Original svn executable not found."
         return 1
     fi
 
-    kmt_is_installed && SVN=$(dirname "$SVN")/svn_kmt_org
+    kmt_is_installed && SVN=$(dirname "$svn")/svn_kmt_org || SVN="$svn"
 
     return 0
-}
-
-auto_set_kmt_scan_backend()
-{
-    if str=$(find_command 'python3') || str=$(find_command 'python') || str=$(find_command 'python2'); then
-        SCAN_BACKEND='python'
-    elif [ -n "$(find_command 'join')" ] && [ -n "$(find_command 'awk')" ]; then
-        SCAN_BACKEND='join'
-    else
-        SCAN_BACKEND='posix'
-    fi
-    return 0
-}
-
-set_kmt_scan_backend()
-{
-    p=$1
-    SCAN_BACKEND="${p#*=}"
-    [ -z "$SCAN_BACKEND" ] && ! auto_set_kmt_scan_backend && return 1
-
-    case "$SCAN_BACKEND" in
-        posix|join|python)
-            ;;
-        auto)
-            auto_set_kmt_scan_backend
-            ;;
-        *)
-            echo "Invalid scanning backend $SCAN_BACKEND"
-            return 1
-            ;;
-    esac
-
-    log "SCAN_BACKEND: $SCAN_BACKEND"
-
-    return 0
-
 }
 
 kmt_install()
@@ -415,6 +538,12 @@ kmt_upgrade()
 # SVN API
 ##############################################################################
 
+SVN_KMT_VERSION="0.7.8"
+
+FILE_MTIME_PROP="file:mtime"
+
+SCAN_BACKEND=
+
 svn_call()
 {
     log "$SVN $*"
@@ -422,7 +551,7 @@ svn_call()
     case "$1" in
         update|up|checkout|co|revert|switch)
         #don't use option use-commit-times=yes anymore, in some build of svn(eg. 1.7.14 (r1542130)), it will update the file mtime as commit time when just
-        #file:mtime metadata has changed, this may case the time conflicting check failure.
+        #file:mtime metadata has changed, this may cause the time conflicting check failure.
 #            LC_MESSAGES=C "$SVN" --config-option config:miscellany:use-commit-times=yes "$@"
             LC_MESSAGES=C "$SVN" "$@"
             ;;
@@ -430,6 +559,46 @@ svn_call()
             LC_MESSAGES=C "$SVN" "$@"
             ;;
     esac
+}
+
+##############################################################################
+# Working Copy Functions
+##############################################################################
+
+auto_set_kmt_scan_backend()
+{
+    if str=$(find_command 'python3') || str=$(find_command 'python') || str=$(find_command 'python2'); then
+        SCAN_BACKEND='python'
+    elif [ -n "$(find_command 'join')" ] && [ -n "$(find_command 'awk')" ]; then
+        SCAN_BACKEND='join'
+    else
+        SCAN_BACKEND='posix'
+    fi
+    return 0
+}
+
+set_kmt_scan_backend()
+{
+    p=$1
+    SCAN_BACKEND="${p#*=}"
+    [ -z "$SCAN_BACKEND" ] && ! auto_set_kmt_scan_backend && return 1
+
+    case "$SCAN_BACKEND" in
+        posix|join|python)
+            ;;
+        auto)
+            auto_set_kmt_scan_backend
+            ;;
+        *)
+            echo "Invalid scanning backend $SCAN_BACKEND"
+            return 1
+            ;;
+    esac
+
+    log "SCAN_BACKEND: $SCAN_BACKEND"
+
+    return 0
+
 }
 
 svn_prop_get()
@@ -440,133 +609,6 @@ svn_prop_get()
 svn_prop_set()
 {
     svn_call propset "$FILE_MTIME_PROP" "$2" "$1@"
-}
-
-##############################################################################
-# Time Functions
-##############################################################################
-
-is_timestamp()
-{
-    echo "$1" | grep -Eq '^[0-9]+$'
-}
-
-format_timestamp() {
-#    log "ts: $1, tz: $TZ_SECONDS"
-
-    ts=$(($1 + ${2:-"$TZ_SECONDS"}))
-    d=$((ts / 86400 + 1))
-    s=$((ts % 86400))
-    [ "$s" -lt 0 ] && s=$((s + 86400)) && d=$((d - 1))
-
-    y=1970
-    while true; do
-        leap=0
-        [ $((y % 4)) -eq 0 ] && { [ $((y % 100)) -ne 0 ] || [ $((y % 400)) -eq 0 ]; } && leap=1
-        days=365; [ "$leap" -eq 1 ] && days=366
-        [ "$d" -gt "$days" ] || break
-        d=$((d - days)); y=$((y + 1))
-    done
-
-    m=1
-    while true; do
-        leap=0
-        [ $((y % 4)) -eq 0 ] && { [ $((y % 100)) -ne 0 ] || [ $((y % 400)) -eq 0 ]; } && leap=1
-        case "$m" in
-            1|3|5|7|8|10|12) dm=31 ;;
-            4|6|9|11) dm=30 ;;
-            2) dm=$((leap ? 29 : 28)) ;;
-        esac
-        [ "$d" -gt "$dm" ] || break
-        d=$((d - dm)); m=$((m + 1))
-    done
-
-    printf "%04d-%02d-%02d %02d:%02d:%02d" "$y" "$m" "$d" $((s/3600)) $(((s%3600)/60)) $((s%60))
-}
-
-get_file_mtime()
-{
-    file="$1"
-
-    case "$PLATFORM" in
-
-        linux)
-
-            if ! stat -c %Y "$file"; then
-                echo "get_file_mtime failed: '$file'"
-                return 1
-            fi
-            ;;
-
-
-        macos)
-
-            if ! stat -f %m "$file"; then
-                echo "get_file_mtime failed: '$file'"
-                return 1
-            fi
-            ;;
-
-        *)
-
-            return 1
-            ;;
-
-    esac
-
-    return 0
-}
-
-set_file_mtime()
-{
-    file="$1"
-    timestamp="$2"
-
-    is_timestamp "$timestamp" || return 1
-
-    case "$PLATFORM" in
-
-        linux)
-
-            touch -m -d "@$timestamp" "$file" || return 1
-
-            ;;
-
-        macos)
-
-            touch -m \
-                -t "$(date -r "$timestamp" "+%Y%m%d%H%M.%S")" \
-                "$file" || return 1
-
-            ;;
-
-        *)
-
-            return 1
-            ;;
-
-    esac
-}
-
-##############################################################################
-# Working Copy Functions
-##############################################################################
-
-get_timestamp()
-{
-    dt=$1
-
-    [ -z "$dt" ] && return 0
-
-    case "$PLATFORM" in
-        linux)
-            date -u -d "$dt" +%s
-            ;;
-        macos)
-            dt="${dt%%.*}Z"
-            date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$dt" +%s
-            ;;
-    esac
 }
 
 get_versioned_timestamp() {
@@ -998,13 +1040,6 @@ on_file_scan()
     return 0
 }
 
-fix_len()
-{
-    str=$1
-    len=$2
-    printf "% ${len}s" "$str"
-}
-
 kmt_command()
 {
     if [ $# = 0 ]; then
@@ -1298,38 +1333,6 @@ save_a_file_mtime()
     return 0
 }
 
-select_arg_dirs()
-{
-    for p in "$@";
-    do
-        case "$p" in
-            -*)
-                opt_key=$p
-                #Skip option key
-                continue
-            ;;
-
-            *)
-                if [ "$opt_key" = '-m' ]; then
-                  #Skip comment content
-                  opt_key=
-                  continue
-                else
-                    if [ -n "$opt_key" ] && [ ! -e "$p" ]; then
-                        #It is mostly a option value, skip it
-                        opt_key=
-                        continue
-                    fi
-                    opt_key=
-                fi
-            ;;
-        esac
-        echo "$p"
-    done
-
-    return 0
-}
-
 save_file_mtime()
 {
     dir=$1
@@ -1494,7 +1497,8 @@ svn_command_handler()
 
     log "$cmd start"
 
-    if [ "$cmd" = 'commit' ]; then
+    if [ "$cmd" = 'commit' ] || [ "$cmd" = 'ci' ]; then
+
         shift
 
         ! detect_time_offset "$@" && return 1
@@ -1699,67 +1703,41 @@ dispatch()
     cmd="$1"
 
     bn=$(basename "$0")
-    case $cmd in
-        "kmt-install"|"install"|"kmt-upgrade"|"upgrade")
-
-            if [ "$bn" != "svn_kmt.sh" ]; then
+    if [ "$bn" = "svn_kmt.sh" ] || [ "$bn" = "svn_main.sh" ]; then
+        case $cmd in
+            "kmt-install"|"install"|"kmt-upgrade"|"kmt-version")
+                #pass
+            ;;
+            *)
+                if ! svn "kmt-version"; then
+                    echo "The SVN Keep MTime should be installed firstly,
+    please run the command as follows to install it:
+    ./svn_kmt.sh kmt-install
+    "
+                else
+                    echo "The SVN commands should not be called startswith svn_kmt.sh, but run as follows:
+    svn $*
+    "
+                fi
+                return 1
+            ;;
+          esac
+    else
+        case $cmd in
+            "kmt-install"|"install"|"kmt-upgrade")
                 echo "Please run the command as follows:
     ./svn_kmt.sh $*
 "
                 return 1
-            fi
-
-        ;;
-        "kmt-version") ;;
-        *)
-            if [ "$bn" = "svn_kmt.sh" ]; then
-                if ! kmt_is_installed; then
-                    echo "The SVN Keep MTime should be installed firstly,
-please run the command as follows to install it:
-    ./svn_kmt.sh kmt-install
-"
-                else
-                    echo "Please run the command as follows:
-    svn $*
-"
-                fi
-                return 1
-            fi
-        ;;
-    esac
+            ;;
+        esac
+    fi
 
     case "$cmd" in
 
-        ci|commit)
+        ci|commit|up|update|revert|co|checkout)
 
-            shift
-
-            svn_command_handler commit "$@"
-
-            ;;
-
-
-        up|update)
-
-            shift
-
-            svn_command_handler update "$@"
-
-            ;;
-
-        revert)
-
-            shift
-
-            svn_command_handler revert "$@"
-
-            ;;
-
-        co|checkout)
-
-            shift
-
-            svn_command_handler checkout "$@"
+            svn_command_handler "$@"
 
             ;;
 
@@ -1800,7 +1778,7 @@ please run the command as follows to install it:
 
             ;;
 
-        kmt-upgrade|upgrade)
+        kmt-upgrade)
 
             shift
 
@@ -1824,7 +1802,7 @@ please run the command as follows to install it:
 
 main()
 {
-    [ "$1" = '--kmt-debug' ] && shift && SVN_KMT_DEBUG=1
+    [ "$1" = '--kmt-debug' ] && shift && set_debug_mode 1
 
     detect_platform &&
     detect_time_zone &&
